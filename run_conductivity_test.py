@@ -90,35 +90,30 @@ config = {
     #   12 CLAY_CAP_CENT  central clay cap (smectite-rich)
     'regions': {
         # Basement / deep crystalline (m ~ 1.7, Revil et al. 2024)
-        # Grain density 2750-2800 kg/m3 (typical granodiorite/gneiss)
         1:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0},
         2:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0},
         4:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
-        5:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
-        6:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
+        5:  {'porosity_exponent_m': 1.8, 'grain_density': 2750.0},
+        6:  {'porosity_exponent_m': 1.8, 'grain_density': 2750.0},
 
         # Volcanic edifice (m ~ 2.1, Zhang & Revil 2023)
-        # Grain density 2700 kg/m3 (andesite)
         3:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
         7:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
-        8: {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
+        8:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
 
-        # Outflow zone (fractured, m ~ 1.5)
-        10:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
+        # Outflow zone (fractured)
+        10: {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
 
-        # Shallow volcanic edifice (high porosity/permeability)
+        # Shallow volcanic edifice
         9:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
 
-        # Clay caps (altered volcanics, m ~ 2.2)
-        # Lower grain density (~2600) due to smectite/clay alteration.
-        # High CEC from smectite (80-150 meq/100g).
-        # f_stern = 0.90 (lower Stern fraction for clays, more
-        # counterions in diffuse layer -> higher surface conduction).
-        11: {'porosity_exponent_m': 2.2, 'grain_density': 2600.0,
+        # Clay caps (altered volcanics, high CEC)
+        11: {'porosity_exponent_m': 1.8, 'grain_density': 2600.0,
              'CEC_meq_per_100g': 80.0, 'f_stern': 0.90},
-        12: {'porosity_exponent_m': 2.2, 'grain_density': 2600.0,
+        12: {'porosity_exponent_m': 1.8, 'grain_density': 2600.0,
              'CEC_meq_per_100g': 150.0, 'f_stern': 0.90},
     },
+
 
     # Default region properties (used where no region-specific override)
     'default_region': {
@@ -128,7 +123,7 @@ config = {
     },
 
     # --- Salinity floor ---
-    'min_fluid_salinity_wt_percent': 0.1,
+    'min_fluid_salinity_wt_percent': 0.5,
 
     # --- Two-phase fluid mixing ---
     'two_phase_mixing': 'hashin_shtrikman',
