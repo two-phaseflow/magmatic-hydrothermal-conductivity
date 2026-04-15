@@ -109,9 +109,9 @@ config = {
 
         # Clay caps (altered volcanics, high CEC)
         11: {'porosity_exponent_m': 1.8, 'grain_density': 2600.0,
-             'CEC_meq_per_100g': 80.0, 'f_stern': 0.90},
+             'CEC_meq_per_100g': 20.0, 'f_stern': 0.90},
         12: {'porosity_exponent_m': 1.8, 'grain_density': 2600.0,
-             'CEC_meq_per_100g': 150.0, 'f_stern': 0.90},
+             'CEC_meq_per_100g': 40.0, 'f_stern': 0.90},
     },
 
 
