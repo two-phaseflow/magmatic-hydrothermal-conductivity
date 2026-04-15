@@ -3,10 +3,18 @@
 viscosity.py -- Dynamic viscosity of H2O-NaCl fluids
 =====================================================
 
-Implements the revised empirical model of Klyukin et al. (2017) for
-computing the dynamic viscosity of NaCl-bearing aqueous fluids at
-elevated temperatures and pressures, combined with the IAPWS-2008
-formulation of Huber et al. (2009) for pure water viscosity.
+Computes the dynamic viscosity of NaCl-bearing aqueous fluids at
+elevated temperatures and pressures. The calculation chains three
+models:
+
+    1. Klyukin et al. (2017) — maps an NaCl solution at (T, P, x)
+       onto an equivalent pure water temperature T* (Eqs. 3-6).
+    2. IAPWS95/97 — computes pure water density at (T*, P).
+    3. Huber et al. (2009) / IAPWS-2008 — computes pure water
+       viscosity at (T*, rho) as mu_0 * mu_1 * mu_2.
+
+The result is the viscosity of the NaCl solution at the original
+(T, P, x_NaCl) conditions.
 
 Public interface
 ----------------
@@ -22,69 +30,64 @@ Vectorized:
     t_star_mu_vectorized            Array equivalent temperature T*
     visc_inc_data_fit_vectorized    Array valid-range check
 
-Governing equations
--------------------
-The Klyukin et al. (2017) model is based on the equivalent-temperature
-concept: the viscosity of an NaCl solution at (T, P, x_NaCl) equals
-the viscosity of pure water evaluated at a shifted temperature T* and
-the same pressure P (Eq. 3):
+Calculation chain
+-----------------
+Step 1: Equivalent temperature T* (Klyukin et al., 2017)
 
-    mu_brine(x, T, P) = mu_H2O(T*, P)
+    The viscosity of an NaCl solution at (T, P, x_NaCl) equals
+    the viscosity of pure water evaluated at a shifted temperature
+    T* and the same pressure P (Eq. 3):
 
-The equivalent temperature T* is computed from three equations:
+        mu_brine(x, T, P) = mu_H2O(T*, P)
 
-    T* = e1 + e2 * T                               (Eq. 4)
-    e1 = a1 * x^a2                                  (Eq. 5)
-    e2 = 1 - b1*T^b2 - b3*x^a2*T^b2                (Eq. 6)
+    T* is computed from:
 
-where x is the NaCl mass fraction and T is temperature in Celsius.
-Coefficients from Table 2:
+        T* = e1 + e2 * T                               (Eq. 4)
+        e1 = a1 * x^a2                                  (Eq. 5)
+        e2 = 1 - b1*T^b2 - b3*x^a2*T^b2                (Eq. 6)
 
-    a1 = -35.9858, a2 = 0.80017
-    b1 = 1e-6, b2 = -0.05239, b3 = 1.32936
+    Coefficients from Table 2:
+        a1 = -35.9858, a2 = 0.80017
+        b1 = 1e-6, b2 = -0.05239, b3 = 1.32936
 
-The pure water viscosity mu_H2O(T, rho) follows the IAPWS-2008
-formulation (Huber et al., 2009), which decomposes viscosity into
-three multiplicative contributions (Eq. 2):
+Step 2: Pure water density at (T*, P)
 
-    mu = mu_0(T*) * mu_1(T*, rho*) * mu_2(T*, rho*)
+    The scalar version uses IAPWS95 (Helmholtz free energy,
+    iterative, valid to 1000 MPa).
 
-    mu_0: Zero-density limit (Eq. 11). Kinetic theory contribution,
-          depends only on temperature. Coefficients H_i from Table 1.
+    The vectorized version tries IAPWS97 first (algebraic IF97,
+    faster, valid to 100 MPa) and falls back to IAPWS95 for
+    pressures above 100 MPa or other IAPWS97 failures.
 
-    mu_1: Residual (finite-density) contribution (Eq. 12). Captures
-          intermolecular interactions. Coefficients H_ij from Table 2.
-          Double power series in (1/T* - 1) and (rho* - 1).
+Step 3: Pure water viscosity at (T*, rho)
 
-    mu_2: Critical enhancement (Eqs. 19-20). Divergent viscosity near
-          the critical point. Requires numerical compressibility
-          derivatives via IAPWS95 equation of state.
+    Huber et al. (2009) / IAPWS-2008 formulation (Eq. 2):
+
+        mu = mu_0(T*) * mu_1(T*, rho*) * mu_2(T*, rho*)
+
+    mu_0: Zero-density limit (Eq. 11). Kinetic theory contribution.
+          Coefficients H_i from Table 1.
+
+    mu_1: Residual (finite-density) contribution (Eq. 12).
+          Coefficients H_ij from Table 2. Double power series
+          in (1/T* - 1) and (rho* - 1).
+
+    mu_2: Critical enhancement (Eqs. 19-20). Significant only
+          within ~50 K of the critical point.
 
     T* = T/T_c and rho* = rho/rho_c are reduced quantities with
-    T_c = 647.096 K, rho_c = 322 kg/m3, P_c = 22.064 MPa.
+    T_c = 647.096 K, rho_c = 322 kg/m3.
 
 Modeling assumptions
 --------------------
-1. The equivalent-temperature concept assumes that the viscosity of
-   an NaCl solution can be mapped onto the pure water viscosity
-   surface via a temperature shift that depends on composition and
-   temperature. This is an empirical observation, not derived from
-   first principles.
+1. The equivalent-temperature concept is empirical, not derived
+   from first principles.
 
-2. The vectorized version uses IAPWS97 (algebraic IF97 formulation)
-   for water density instead of IAPWS95 (iterative Helmholtz
-   formulation). IAPWS97 is orders of magnitude faster but has
-   slightly lower accuracy near the critical point.
+2. The vectorized version uses a simplified critical enhancement
+   (mu_2) to avoid per-node IAPWS95 calls. Negligible error
+   except very close to the critical point.
 
-3. The vectorized critical enhancement (mu_2) uses a simplified chi
-   calculation that avoids per-node IAPWS95 calls. This introduces
-   negligible error except very close to the critical point
-   (|T - T_c| < 1 K, |rho - rho_c| < 10 kg/m3), which is not
-   relevant for geothermal/magmatic applications.
-
-4. The viscosity is returned in centipoise (cP) for compatibility
-   with the conductivity pipeline, which expects cP from the
-   viscosity module. 1 cP = 1e-3 Pa.s.
+3. The viscosity is returned in centipoise (cP). 1 cP = 1e-3 Pa.s.
 
 Valid range (Klyukin, 2017)
 ---------------------------
@@ -663,22 +666,35 @@ def viscosity_h2o_nacl_vectorized(wt_frac_NaCl, T_C, P_bar, rho_water=None):
         T_valid = T_star[valid_mask]
         P_valid = P_bar[valid_mask]
 
-        # Get water properties using IAPWS97 (IF97 algebraic formulation -- much faster)
+        # Get water properties: try IAPWS97 first (fast algebraic),
+        # fall back to IAPWS95 (slower iterative) if IAPWS97 fails.
+        # IAPWS97 has a 100 MPa limit for steam-like conditions
+        # (Region 2/5), so high-pressure supercritical nodes need
+        # IAPWS95.
         rho_water = np.zeros_like(T_valid)
-        n_iapws_fail = 0
+        n_iapws97_ok = 0
+        n_iapws95_fallback = 0
+        n_fail = 0
         for i, (T_val, P_val) in enumerate(zip(T_valid, P_valid * 0.1)):  # Convert to MPa
             try:
                 pure_water = IAPWS97(T=T_val, P=P_val)
                 rho_water[i] = pure_water.rho
+                n_iapws97_ok += 1
             except Exception:
-                rho_water[i] = 1000.0  # Fallback density
-                n_iapws_fail += 1
+                # IAPWS97 failed — use IAPWS95
+                try:
+                    pure_water = IAPWS95(T=T_val, P=P_val)
+                    rho_water[i] = pure_water.rho
+                    n_iapws95_fallback += 1
+                except Exception:
+                    rho_water[i] = 1000.0
+                    n_fail += 1
 
-        if n_iapws_fail > 0:
+        if n_iapws95_fallback > 0 or n_fail > 0:
             warnings.warn(
-                f"viscosity: IAPWS97 failed at {n_iapws_fail} nodes, "
-                f"using fallback rho=1000 kg/m3. Results at these nodes "
-                f"are approximate.")
+                f"viscosity: IAPWS97->{n_iapws97_ok} ok, "
+                f"IAPWS95 fallback->{n_iapws95_fallback}, "
+                f"failed->{n_fail}")
 
         # Validate densities
         bad_rho = (rho_water <= 0) | ~np.isfinite(rho_water)

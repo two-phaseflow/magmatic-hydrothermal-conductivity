@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-run_conductivity_test.py -- Conductivity analysis using vtu_io + conductivity
+run_conductivity_test.py -- Conductivity analysis using vtu_io + conductivity_lib
 ==================================================================================
 
 Loads a CSMP++ VTU timestep, computes electrical conductivity via the
@@ -90,30 +90,35 @@ config = {
     #   12 CLAY_CAP_CENT  central clay cap (smectite-rich)
     'regions': {
         # Basement / deep crystalline (m ~ 1.7, Revil et al. 2024)
+        # Grain density 2750-2800 kg/m3 (typical granodiorite/gneiss)
         1:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0},
         2:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0},
         4:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
-        5:  {'porosity_exponent_m': 1.8, 'grain_density': 2750.0},
-        6:  {'porosity_exponent_m': 1.8, 'grain_density': 2750.0},
+        5:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
+        6:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
 
         # Volcanic edifice (m ~ 2.1, Zhang & Revil 2023)
+        # Grain density 2700 kg/m3 (andesite)
         3:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
         7:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
-        8:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
+        8: {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
 
-        # Outflow zone (fractured)
-        10: {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
+        # Outflow zone (fractured, m ~ 1.5)
+        10:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
 
-        # Shallow volcanic edifice
+        # Shallow volcanic edifice (high porosity/permeability)
         9:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
 
-        # Clay caps (altered volcanics, high CEC)
-        11: {'porosity_exponent_m': 1.8, 'grain_density': 2600.0,
+        # Clay caps (altered volcanics, m ~ 2.2)
+        # Lower grain density (~2600) due to smectite/clay alteration.
+        # High CEC from smectite (80-150 meq/100g).
+        # f_stern = 0.90 (lower Stern fraction for clays, more
+        # counterions in diffuse layer -> higher surface conduction).
+        11: {'porosity_exponent_m': 2.2, 'grain_density': 2600.0,
              'CEC_meq_per_100g': 20.0, 'f_stern': 0.90},
-        12: {'porosity_exponent_m': 1.8, 'grain_density': 2600.0,
+        12: {'porosity_exponent_m': 2.2, 'grain_density': 2600.0,
              'CEC_meq_per_100g': 40.0, 'f_stern': 0.90},
     },
-
 
     # Default region properties (used where no region-specific override)
     'default_region': {
@@ -123,17 +128,17 @@ config = {
     },
 
     # --- Salinity floor ---
-    'min_fluid_salinity_wt_percent': 0.5,
+    'min_fluid_salinity_wt_percent': 0.1,
 
     # --- Two-phase fluid mixing ---
-    'two_phase_mixing': 'hashin_shtrikman',
+    'mixing_law': 'glover',
 
     # --- Clay cap identification ---
     'clay_cap_regions': [11, 12],
 
     # --- Intrusion region ---
     'intrusion_id': 1,
-    'spent_magma_min_porosity': 0.02,
+    'spent_magma_min_porosity': 0.05,
 
     # --- Melt domain ---
     'melt_threshold': 0.0
@@ -150,8 +155,8 @@ config = {
 # Load VTU and compute conductivity
 # =============================================================================
 
-timestep_vtu = './yuz_basecase/Variables_100000.vtu'
-initial_vtu = './yuz_basecase/Initial.vtu'
+timestep_vtu = '../vtus/yuz_homogenized/Variables_25000.vtu'
+initial_vtu = '../vtus/yuz_homogenized/Initial.vtu'
 
 results = run_conductivity(timestep_vtu, initial_vtu, config=config)
 
@@ -235,6 +240,51 @@ if temp_manual:
                        fmt=lambda v: f"{int(v)}C", inline=True,
                        inline_spacing=5, fontsize=13, colors='red')
     add_halo(labels, lw=4.0)
+
+# Clay cap region boundaries — extracted from element edges
+from vtu_io import load_initial_vtu
+from scipy.spatial import cKDTree
+
+init_data = load_initial_vtu(initial_vtu)
+if 'region_id_initial' in init_data and 'region_id_initial_centers' in init_data:
+    init_rid = init_data['region_id_initial']
+    cx_init, cy_init = init_data['region_id_initial_centers']
+    tree = cKDTree(np.column_stack((cx_init, cy_init)))
+
+    # Map Initial.vtu element region IDs to timestep triangles
+    tri_cx = np.mean(x[triangles], axis=1)
+    tri_cy = np.mean(y[triangles], axis=1)
+    _, idx = tree.query(np.column_stack((tri_cx, tri_cy)))
+    region_per_tri = init_rid[idx]
+
+    # Find boundary edges: edges where one triangle is in the target
+    # region and the adjacent triangle is not (or is on the mesh boundary).
+    # Build edge-to-triangle map.
+    from collections import defaultdict
+    edge_to_tris = defaultdict(list)
+    for i_tri, tri in enumerate(triangles):
+        for e in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])]:
+            edge = tuple(sorted(e))
+            edge_to_tris[edge].append(i_tri)
+
+    for rid, color in [(11, 'grey'), (12, 'grey')]:
+        boundary_edges = []
+        for edge, tri_list in edge_to_tris.items():
+            if len(tri_list) == 1:
+                if region_per_tri[tri_list[0]] == rid:
+                    boundary_edges.append(edge)
+            elif len(tri_list) == 2:
+                r0 = region_per_tri[tri_list[0]]
+                r1 = region_per_tri[tri_list[1]]
+                if (r0 == rid) != (r1 == rid):
+                    boundary_edges.append(edge)
+
+        for n0, n1 in boundary_edges:
+            ax.plot([x[n0], x[n1]], [y[n0], y[n1]],
+                    color=color, linewidth=1.5, solid_capstyle='round',
+                    alpha=1)
+
+        print(f"  Region {rid}: {len(boundary_edges)} boundary edges")
 
 # Axes
 ax.set_xlabel('Distance (km)', fontsize=16)
