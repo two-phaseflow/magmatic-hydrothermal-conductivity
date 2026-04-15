@@ -70,7 +70,28 @@ Hydrothermal domain (no melt):
 
     where F = a / phi^m is the formation factor (Archie, 1942) and
     sigma_surface is the surface conduction contribution from cation
-    exchange on mineral surfaces (Revil et al., 2017, GJI 208, Eq. 15).
+    exchange on mineral surfaces. The specific surface model is selected
+    by config['surface_conduction_model']:
+
+        'waxman_smits' -- Waxman-Smits / Revil formulation using
+            sigma_s = (1 / (F * phi)) * (1 - phi) * rho_g * beta_plus
+                    * (1 - f) * CEC
+            i.e. the Waxman-Smits bulk-volume form equivalent to Revil
+            et al. (2017) Eq. (16), including the (1 - phi) factor.
+
+        'levy' -- Levy et al. (2018, GJI 215, Eq. 16) empirical
+            smectite surface conductivity:
+            sigma_s = B'(T) * (CEC / CEC_0) * (1 - phi) / phi^(1 - m)
+            used here as the additive sigma_surface term within Levy's
+            three-pathway framework (Eq. 13).
+
+        'hybrid' -- Levy in config['clay_cap_regions'], corrected
+            Waxman-Smits elsewhere in the hydrothermal domain.
+
+    The 'levy' option follows Levy et al. (2018), "The role of
+    smectites in the electrical conductivity of active hydrothermal
+    systems: Electrical properties of core samples from Krafla volcano,
+    Iceland" (Geophys. J. Int. 215, 1558-1582).
 
 Mixing laws
 -----------
@@ -104,8 +125,11 @@ The hydrothermal domain supports two mixing law options
         brine saturations, because it assumes brine connectivity
         within the pore space independent of pore geometry.
 
-Surface conduction (sigma_surface) is added in both cases
-following Revil et al. (2017, GJI 208, Eq. 15).
+Surface conduction (sigma_surface) is added in both cases using the
+configured surface_conduction_model. The default is the corrected
+Waxman-Smits form; the Levy et al. (2018) option uses their Eq. (16)
+as the additive surface term within Eq. (13); and the 'hybrid' option
+applies Levy only inside config['clay_cap_regions'].
 
 The density-based model switch for the vapor phase (Watanabe above
 450 kg/m3, density model at 200-450 kg/m3, Sinmyo-Keppler below
@@ -266,9 +290,10 @@ Surface conduction
 ------------------
 Surface conduction follows the Waxman-Smits (1968, J. Pet. Tech. 20(6),
 107-122) framework as reformulated by Revil & Florsch (2010, GJI 181,
-1480-1498, Eqs. 2-7) and Revil et al. (2017, GJI 208, 826-844, Eq. 15):
+1480-1498, Eqs. 2-7) and Revil et al. (2017, GJI 208, 826-844, Eq. 16):
 
-    sigma_s = (1 / (F * phi)) * rho_g * beta_plus * (1 - f) * CEC
+    sigma_s = (1 / (F * phi)) * (1 - phi) * rho_g * beta_plus
+            * (1 - f) * CEC
 
 where rho_g is grain density [kg/m3], beta_plus is counterion mobility
 [m2/(V.s)], f is the Stern layer fraction [-], and CEC is the cation
@@ -283,6 +308,22 @@ Temperature dependence of counterion mobility (Revil et al., 2017):
 Saturation scaling uses S_total = S_liq + S_vap rather than S_liq alone,
 because at supercritical conditions the "vapor" phase still wets mineral
 surfaces and contributes to surface conduction.
+
+For smectite-rich rocks, config['surface_conduction_model'] can instead
+select the Levy et al. (2018, GJI 215, Eqs. 13, 16, 17) model:
+
+    sigma_s = B'(T) * (CEC / CEC_0) * (1 - phi) / phi^(1 - m)
+    B'(T) = B'_ref * (1 + alpha_T * (T - T_ref))
+
+In this implementation Levy Eq. (16) is used as the additive
+sigma_surface term within the three-pathway framework of Eq. (13),
+while the pore-fluid term sigma_w/F is still provided by the selected
+mixing law. This keeps the model usable across low- and high-salinity
+conditions without introducing the sample-specific intra-solid term.
+
+If config['surface_conduction_model'] = 'hybrid', the code applies the
+Levy model only in config['clay_cap_regions'] and uses the corrected
+Waxman-Smits formulation elsewhere in the hydrothermal domain.
 
 Phase fractions from CSMP++
 ---------------------------
@@ -366,6 +407,12 @@ Laumonier, M., Karakas, O., Bachmann, O., Gaillard, F., Lukacs, R. &
     Seghedi, I. (2019). Evidence for a persistent magma reservoir with
     large melt content beneath an apparently extinct volcano. Earth
     Planet. Sci. Lett. 521, 79-90.
+    
+Levy, L., Gibert, B., Sigmundsson, F., Flovenz, O.G., Hersir, G.P.,
+    Briole, P., Pezard, P.A. & Doin, M.P. (2018). The role of smectites
+    in the electrical conductivity of active hydrothermal systems:
+    Electrical properties of core samples from Krafla volcano, Iceland.
+    Geophys. J. Int. 215, 1558-1582.
 
 Olhoeft, G.R. (1981). Electrical properties of granite with implications
     for the lower crust. J. Geophys. Res. 86(B2), 931-936.
@@ -467,7 +514,7 @@ M_NACL = 0.05844
 
 # Conversion: meq/100g -> C/kg (SI).
 # 1 meq = 96.485e-3 C; per 100g = per 0.1 kg; so 1 meq/100g = 0.96485 C/kg.
-# Ref: Revil et al. (2017) GJI 208, Eq. (15) uses CEC in C/kg.
+# Used for Waxman-Smits/Revil CEC in SI units and for Levy's CEC_0 reference.
 MEQ_TO_CKG = 9.6485
 
 
@@ -493,9 +540,19 @@ DEFAULT_CONFIG = {
     'spent_magma_min_porosity': 0.05,      # porosity floor for solidified intrusion
     'intrusion_id': 1,            # region ID of the intrusion body
 
-    # --- Surface conduction (Revil et al., 2017, GJI 208, Eq. 15) ---
+    # --- Surface conduction model ---
+    'surface_conduction_model': 'waxman_smits',  # 'waxman_smits', 'levy', or 'hybrid'
+
+    # Waxman-Smits / Revil parameters
     'counterion_mobility_25C': 5.19e-8,   # beta(Na+, 25C) [m2/(V.s)]
     'counterion_temp_coeff': 0.037,        # alpha [1/C], linear T dependence
+
+    # Levy et al. (2018, GJI 215) parameters
+    # Used when surface_conduction_model = 'levy'.
+    'levy_CEC_0_meq_per_100g': 91.0,  # pure smectite reference CEC [meq/100g]
+    'levy_B_prime': 0.77,             # proportionality constant B' [S/m]
+    'levy_alpha_T': 0.040,            # temperature coefficient [1/C]
+    'levy_T_ref': 25.0,               # reference temperature [deg C]
 
     # --- Per-region properties ---
     # Override any default_region property for specific region IDs.
@@ -743,12 +800,23 @@ def sigma_liquid(wt_frac_NaCl, T_C, P_bar, density_solution):
     M_m3 = (molality * density_solution) / (1.0 + molality * M_NACL)
     sigma = Lambda * M_m3
 
-    # Floor to 1e-6 S/m; warn if non-zero-salinity nodes are floored
+    # Floor to 1e-6 S/m; warn if non-zero-salinity nodes are floored and
+    # report the conditions at floored nodes so phase-transition
+    # extrapolation artifacts can be diagnosed (e.g. Watanabe breaking
+    # down at supercritical-like "liquid" densities near the critical
+    # point).
     floored = (sigma < 1e-6) & ~low_sal & np.isfinite(sigma)
     if np.any(floored):
+        m = floored
         warnings.warn(
-            f"sigma_liquid: {int(np.sum(floored))} non-zero-salinity nodes "
-            f"floored to 1e-6 S/m. Check T/P/density inputs.")
+            f"sigma_liquid: {int(np.sum(m))} non-zero-salinity nodes "
+            f"floored to 1e-6 S/m. Floored nodes: "
+            f"T={T_C[m].min():.0f}-{T_C[m].max():.0f} C, "
+            f"P={P_bar[m].min():.0f}-{P_bar[m].max():.0f} bar, "
+            f"rho={density_solution[m].min():.1f}-"
+            f"{density_solution[m].max():.1f} kg/m3, "
+            f"wt%NaCl={wt_frac_NaCl[m].min()*100:.3g}-"
+            f"{wt_frac_NaCl[m].max()*100:.3g}.")
 
     sigma = np.where(low_sal, 1e-6, sigma)
     sigma = np.where(np.isnan(sigma), 1e-6, sigma)
@@ -914,10 +982,21 @@ def sigma_vapor(wt_frac_NaCl, T_C, P_bar, density_solution):
         result[i] = _sigma_vapor_single(
             wt_frac_NaCl[i], T_C[i], P_bar[i], density_solution[i])
 
-    n_floor = int(np.sum(result <= 1e-6))
+    # Report conditions at floor nodes so ultra-dilute physical cases can
+    # be distinguished from Sinmyo-Keppler extrapolation failures
+    # (Lambda0 <= 0 at the edge of the fit, or IAPWS failures).
+    m = result <= 1e-6
+    n_floor = int(np.sum(m))
     if n_floor > 0 and n_floor < len(result):
         warnings.warn(
-            f"sigma_vapor: {n_floor}/{len(result)} nodes at floor (1e-6 S/m)")
+            f"sigma_vapor: {n_floor}/{len(result)} nodes at floor "
+            f"(1e-6 S/m). Floored nodes: "
+            f"T={T_C[m].min():.0f}-{T_C[m].max():.0f} C, "
+            f"P={P_bar[m].min():.0f}-{P_bar[m].max():.0f} bar, "
+            f"rho={density_solution[m].min():.2f}-"
+            f"{density_solution[m].max():.2f} kg/m3, "
+            f"wt%NaCl={wt_frac_NaCl[m].min()*100:.3g}-"
+            f"{wt_frac_NaCl[m].max()*100:.3g}.")
 
     return result
 
@@ -926,21 +1005,89 @@ def sigma_vapor(wt_frac_NaCl, T_C, P_bar, density_solution):
 # SECTION 3: FLUID CONDUCTIVITY (two-phase L+V mixing at nodes)
 # =============================================================================
 
+def _sigma_fluid_by_density(wt_frac_NaCl, T_C, P_bar, rho):
+    """
+    Fluid conductivity routed by density.
+
+    Routing:
+        rho >= 450 kg/m3 -> Watanabe (2021) viscosity-based model
+        200 <= rho < 450 -> density model (Watanabe 2022 Section 3.2.2)
+        rho < 200        -> Sinmyo & Keppler (2017) dilute-steam model
+
+    The 450 kg/m3 threshold is the lower bound of the density-model's
+    fit range (Watanabe 2022 fit the density model on Watanabe 2021
+    single-phase data at 450-700 kg/m3). Below 200 kg/m3 the density
+    model is extrapolating and Sinmyo-Keppler is calibrated for
+    dilute steam, so we switch there.
+
+    Applied identically to the liquid and vapor phases because CSMP++
+    may label supercritical fluid as either (what matters is density,
+    not the phase label).
+
+    Parameters
+    ----------
+    wt_frac_NaCl, T_C, P_bar, rho : array_like
+        Per-node inputs, same length.
+
+    Returns
+    -------
+    sigma : ndarray
+        Fluid conductivity [S/m].
+    counts : dict
+        {'watanabe': n_dense, 'density_model': n_intermediate,
+         'sinmyo': n_dilute} for diagnostic printout.
+    """
+    wt_frac_NaCl = np.asarray(wt_frac_NaCl, dtype=float)
+    T_C = np.asarray(T_C, dtype=float)
+    P_bar = np.asarray(P_bar, dtype=float)
+    rho = np.asarray(rho, dtype=float)
+
+    dense = rho >= 450.0
+    intermediate = (rho >= 200.0) & (rho < 450.0)
+    dilute = rho < 200.0
+
+    sigma = np.zeros_like(rho)
+    if np.any(dense):
+        sigma[dense] = sigma_liquid(
+            wt_frac_NaCl[dense], T_C[dense], P_bar[dense], rho[dense])
+    if np.any(intermediate):
+        sigma[intermediate] = sigma_density_model(
+            rho[intermediate], wt_frac_NaCl[intermediate])
+    if np.any(dilute):
+        sigma[dilute] = sigma_vapor(
+            wt_frac_NaCl[dilute], T_C[dilute], P_bar[dilute], rho[dilute])
+
+    counts = {'watanabe': int(np.sum(dense)),
+              'density_model': int(np.sum(intermediate)),
+              'sinmyo': int(np.sum(dilute))}
+    return sigma, counts
+
+
+def _fmt_range(values, mask):
+    """Format min-max range of masked positive finite values."""
+    if not np.any(mask):
+        return "n/a (0 nodes)"
+    v = values[mask]
+    v = v[np.isfinite(v) & (v > 0)]
+    if v.size == 0:
+        return "n/a (all zero/non-finite)"
+    return f"{v.min():.3e} - {v.max():.3e} S/m"
+
+
 def compute_fluid_conductivity(X_liq, X_vap, T_C, P_bar, S_liq, S_vap,
                                rho_liq, rho_vap):
     """
-    Per-phase fluid conductivity at nodes with density-based vapor model.
+    Per-phase fluid conductivity at nodes with density-based routing.
 
-    Assumptions
-    -----------
-    1. Liquid phase always uses Watanabe et al. (2021), which is
-       calibrated for liquid-like densities (rho > 370 kg/m3).
-    2. Vapor phase model depends on density:
-       - rho >= 400 kg/m3: Watanabe (2021). At these densities the
-         fluid is liquid-like and the viscosity-based model is valid.
-       - rho < 400 kg/m3: Sinmyo & Keppler (2017). Watanabe et al.
-         (2021) explicitly note errors > 30% below 400 kg/m3.
-       The 400 kg/m3 threshold comes from Watanabe (2021, Section 4.2).
+    Both phases use the same routing because CSMP++ can label
+    supercritical fluid as either "liquid" (expanded low-density liquid
+    above the critical point) or "vapor"; what matters for conductivity
+    is the fluid state, not the phase label.
+
+    Routing (per node, applied to both phases):
+        rho >= 450 kg/m3 -> Watanabe (2021) viscosity-based model
+        200 <= rho < 450 -> density model (Watanabe 2022, Section 3.2.2)
+        rho < 200        -> Sinmyo & Keppler (2017) dilute-steam model
 
     Parameters
     ----------
@@ -959,46 +1106,34 @@ def compute_fluid_conductivity(X_liq, X_vap, T_C, P_bar, S_liq, S_vap,
         'sigma_liq' and 'sigma_vap' arrays [S/m].
     """
     n = len(T_C)
-    tol = 1e-4
 
-    liq_mask = S_liq > tol
+    liq_mask = S_liq > 0.0
     sig_liq = np.zeros(n)
     if np.any(liq_mask):
-        sig_liq[liq_mask] = sigma_liquid(
-            X_liq[liq_mask], T_C[liq_mask], P_bar[liq_mask], rho_liq[liq_mask])
+        sig_liq[liq_mask], c_liq = _sigma_fluid_by_density(
+            X_liq[liq_mask], T_C[liq_mask], P_bar[liq_mask],
+            rho_liq[liq_mask])
+        print(f"    Liquid: Watanabe(rho>=450)={c_liq['watanabe']}, "
+              f"density_model(200-450)={c_liq['density_model']}, "
+              f"Sinmyo(<200)={c_liq['sinmyo']}")
+        print(f"            sigma_liq range: {_fmt_range(sig_liq, liq_mask)}")
 
-    vap_mask = S_vap > tol
+    vap_mask = S_vap > 0.0
     sig_vap = np.zeros(n)
     if np.any(vap_mask):
-        rho_v = np.asarray(rho_vap)
+        sig_vap[vap_mask], c_vap = _sigma_fluid_by_density(
+            X_vap[vap_mask], T_C[vap_mask], P_bar[vap_mask],
+            rho_vap[vap_mask])
+        print(f"    Vapor:  Watanabe(rho>=450)={c_vap['watanabe']}, "
+              f"density_model(200-450)={c_vap['density_model']}, "
+              f"Sinmyo(<200)={c_vap['sinmyo']}")
+        print(f"            sigma_vap range: {_fmt_range(sig_vap, vap_mask)}")
 
-        # Three vapor conductivity regimes based on density:
-        #   rho >= 450: Watanabe (2021) — validated for liquid-like densities
-        #   200 <= rho < 450: density model — Watanabe-based extrapolation
-        #       (Watanabe et al. 2022, Geothermics 101, Section 3.2.2)
-        #   rho < 200: Sinmyo-Keppler (2017) — very dilute steam
-        dense = vap_mask & (rho_v >= 450.0)
-        intermediate = vap_mask & (rho_v >= 200.0) & (rho_v < 450.0)
-        dilute = vap_mask & (rho_v < 200.0)
-
-        if np.any(dense):
-            sig_vap[dense] = sigma_liquid(
-                X_vap[dense], T_C[dense], P_bar[dense], rho_v[dense])
-        if np.any(intermediate):
-            sig_vap[intermediate] = sigma_density_model(
-                rho_v[intermediate], X_vap[intermediate])
-        if np.any(dilute):
-            sig_vap[dilute] = sigma_vapor(
-                X_vap[dilute], T_C[dilute], P_bar[dilute], rho_v[dilute])
-
-        print(f"    Vapor: dense(Watanabe)={np.sum(dense)}, "
-              f"intermediate(density model)={np.sum(intermediate)}, "
-              f"dilute(Sinmyo-Keppler)={np.sum(dilute)}")
-
-    n_liq = np.sum(liq_mask & ~vap_mask)
-    n_vap = np.sum(~liq_mask & vap_mask)
-    n_2ph = np.sum(liq_mask & vap_mask)
-    print(f"    Phases: liquid={n_liq}, vapor={n_vap}, two-phase={n_2ph}")
+    n_liq = int(np.sum(liq_mask & ~vap_mask))
+    n_vap = int(np.sum(~liq_mask & vap_mask))
+    n_2ph = int(np.sum(liq_mask & vap_mask))
+    print(f"    Phases: liquid-only={n_liq}, vapor-only={n_vap}, "
+          f"two-phase={n_2ph}")
 
     return {'sigma_liq': sig_liq, 'sigma_vap': sig_vap}
 
@@ -1571,7 +1706,8 @@ def archie_three_phase(sigma_solid, sigma_melt, sigma_vol,
 # SECTION 7: SURFACE CONDUCTION
 # Waxman & Smits (1968) J. Pet. Tech. 20(6), 107-122
 # Revil & Florsch (2010) GJI 181, 1480-1498, Eqs. (2)-(7)
-# Revil et al. (2017) GJI 208, 826-844, Eq. (15)
+# Revil et al. (2017) GJI 208, 826-844, Eqs. (15)-(16)
+# Levy et al. (2018) GJI 215, 1558-1582, Eqs. (13), (16), (17)
 # =============================================================================
 
 def build_CEC_array(region_ids, config):
@@ -1660,6 +1796,146 @@ def build_region_property(region_ids, config, prop_name, n_nodes):
             if val is not None:
                 values[mask] = float(val)
     return values
+
+
+def _levy_surface_conductivity(phi_eff, CEC, T, m_arr, config):
+    """
+    Levy et al. (2018) smectite surface conductivity model.
+
+    This helper implements Levy et al. (2018, GJI 215) Eq. (16) with the
+    linear temperature correction from Eq. (17):
+
+        sigma_surface = B'(T) * (CEC / CEC_0) * (1 - phi) / phi^(1 - m)
+        B'(T) = B'_ref * (1 + alpha_T * (T - T_ref))
+
+    In the original paper, Eq. (16) is a low-fluid-conductivity empirical
+    fit to the combined edge double-layer and connected smectite interlayer
+    response of altered Krafla basalts. Here it is used as the additive
+    sigma_surface term within Levy's three-pathway bulk framework
+    (Eq. 13):
+
+        sigma_bulk = sigma_w / F + sigma_EDL + sigma_intra_solid
+
+    with the pore-fluid term sigma_w / F still supplied by the selected
+    bulk mixing law. This preserves the intended low-conductivity behavior
+    while remaining well behaved when fluid conductivity is high.
+
+    Parameters
+    ----------
+    phi_eff : ndarray
+        Effective porosity [-]. Re-clipped internally to [1e-3, 1] as a
+        safety guard against singular behavior at very low porosity.
+    CEC : ndarray
+        Cation exchange capacity [C/kg]. Negative values are clipped to 0.
+    T : ndarray
+        Temperature [deg C].
+    m_arr : ndarray
+        Cementation exponent [-]. Typically ~1.3-3.3 in this workflow.
+    config : dict
+        Must provide or default the following keys:
+        levy_CEC_0_meq_per_100g : float
+            Pure smectite reference CEC [meq/100g]. Default 91.
+        levy_B_prime : float
+            Empirical proportionality constant B' [S/m]. Default 0.77.
+        levy_alpha_T : float
+            Temperature coefficient [1/C]. Default 0.040.
+        levy_T_ref : float
+            Reference temperature [deg C]. Default 25.
+
+    Returns
+    -------
+    sigma_surface : ndarray
+        Surface conductivity contribution [S/m].
+
+    Notes
+    -----
+    Assumptions:
+    - Linear temperature correction is used exactly as in Levy Eq. (17).
+    - The sample-specific intra-solid fitting term from Levy Eq. (15) is
+      not modeled explicitly; its average effect is absorbed into B'.
+    - B' was calibrated on Krafla smectite-bearing volcanic samples, so
+      the model is most defensible for smectite-rich hydrothermal rocks.
+
+    Guards:
+    - phi is clipped to avoid division by zero.
+    - CEC is clipped to remain non-negative.
+    - If the temperature correction would make B'(T) negative, it is
+      clipped to zero and a warning is emitted.
+    """
+    phi_safe = np.clip(np.asarray(phi_eff, dtype=float), 1e-3, 1.0)
+    CEC_safe = np.clip(np.asarray(CEC, dtype=float), 0.0, None)
+    T_arr = np.asarray(T, dtype=float)
+    m_safe = np.asarray(m_arr, dtype=float)
+
+    cec0_meq = max(float(config.get('levy_CEC_0_meq_per_100g', 91.0)), 1e-12)
+    cec0 = cec0_meq * MEQ_TO_CKG
+    B_prime_ref = max(float(config.get('levy_B_prime', 0.77)), 0.0)
+    alpha_T = float(config.get('levy_alpha_T', 0.040))
+    T_ref = float(config.get('levy_T_ref', 25.0))
+
+    temp_factor = 1.0 + alpha_T * (T_arr - T_ref)
+    n_negative = int(np.sum(temp_factor < 0.0))
+    if n_negative:
+        warnings.warn(
+            f"Levy surface conductivity: {n_negative} nodes gave a negative "
+            f"temperature factor; clipped B'(T) to zero.")
+    temp_factor = np.clip(temp_factor, 0.0, None)
+
+    B_prime_T = B_prime_ref * temp_factor
+    cec_ratio = CEC_safe / cec0
+
+    sigma_surface = (B_prime_T
+                     * cec_ratio
+                     * (1.0 - phi_safe)
+                     / np.power(phi_safe, 1.0 - m_safe))
+    return sigma_surface
+
+
+def _waxman_smits_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
+                                       f_stern, CEC, T, config):
+    """
+    Corrected Waxman-Smits surface conductivity.
+
+    Uses the bulk-volume form equivalent to Revil et al. (2017) Eq. (16):
+
+        sigma_surface = (1 / (F * phi)) * (1 - phi) * rho_g * beta_plus(T)
+                      * (1 - f_stern) * CEC * S_total^(n - 1)
+
+    Parameters
+    ----------
+    phi_eff : ndarray
+        Effective porosity [-].
+    F : ndarray
+        Formation factor [-].
+    S_total : ndarray
+        Total wetting saturation used for surface conduction [-].
+    n_arr : ndarray
+        Saturation exponent [-].
+    rho_g : ndarray
+        Grain density [kg/m3].
+    f_stern : ndarray
+        Stern layer fraction [-].
+    CEC : ndarray
+        Cation exchange capacity [C/kg].
+    T : ndarray
+        Temperature [deg C].
+    config : dict
+        Must provide or default counterion_mobility_25C and
+        counterion_temp_coeff.
+
+    Returns
+    -------
+    sigma_surface : ndarray
+        Surface conductivity contribution [S/m].
+    """
+    alpha = config.get('counterion_temp_coeff', 0.037)
+    beta_25 = config.get('counterion_mobility_25C', 5.19e-8)
+    beta = beta_25 * (1.0 + alpha * (np.asarray(T, dtype=float) - 25.0))
+
+    return ((1.0 / (F * phi_eff))
+            * (1.0 - phi_eff)
+            * (S_total ** (n_arr - 1.0))
+            * rho_g * beta * (1.0 - f_stern) * CEC)
 
 
 # =============================================================================
@@ -1830,8 +2106,18 @@ def _compute_fluid_conductivity(nodal_data, config):
             f"(max deviation: {float(np.max(np.abs(S_sum - 1.0))):.3f})")
     _validate_range(Xliq, "salt_fraction_liquid", 0.0, 1.0)
     _validate_range(Xvap, "salt_fraction_vapor", 0.0, 1.0)
-    _validate_range(rhol, "density_liquid", 0.1, 2000.0)
-    _validate_range(rhov, "density_vapor", 0.001, 2000.0)
+
+    # Density is only physical where the phase is present. CSMP++ writes
+    # rho = 0 for the absent phase in single-phase nodes, which would
+    # otherwise fail the range check.
+    liq_present = Sliq > 0.0
+    vap_present = Svap > 0.0
+    if np.any(liq_present):
+        _validate_range(rhol[liq_present],
+                        "density_liquid (where S_liq>0)", 0.1, 2000.0)
+    if np.any(vap_present):
+        _validate_range(rhov[vap_present],
+                        "density_vapor (where S_vap>0)", 0.001, 2000.0)
 
     mixing_law = config.get('mixing_law', 'glover')
     print(f"  Fluid conductivity (mixing_law={mixing_law})...")
@@ -1853,9 +2139,6 @@ def _compute_fluid_conductivity(nodal_data, config):
     # mixing law (Glover or HS) is applied in the hydrothermal domain.
     n_exp = config.get('saturation_exponent_n', 2.0)
     sigma_fluid = Sliq**n_exp * sig_liq + Svap**n_exp * sig_vap
-
-    print(f"    sigma_fluid: {np.nanmin(sigma_fluid):.3e} - "
-          f"{np.nanmax(sigma_fluid):.3e} S/m")
 
     return sigma_fluid, sig_liq, sig_vap
 
@@ -2111,8 +2394,12 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
             sigma_fluid = HS_upper(sigma_liq, sigma_vap, S_liq)
             sigma_bulk = (1/F) * sigma_fluid + sigma_surface
 
-    Surface conduction (sigma_surface) is added in both cases,
-    following Revil et al. (2017, GJI 208, Eq. 15).
+    Surface conduction (sigma_surface) is added in both cases using the
+    configured surface_conduction_model. 'waxman_smits' applies the
+    corrected Waxman-Smits / Revil Eq. (16) form; 'levy' applies Levy
+    et al. (2018) Eq. (16) as the additive surface term in Eq. (13);
+    'hybrid' applies Levy only in config['clay_cap_regions'] and
+    Waxman-Smits elsewhere.
 
     Parameters
     ----------
@@ -2201,25 +2488,52 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
     phi_eff = np.clip(phi_eff_raw, 1e-3, 1.0)
     F = a / (phi_eff ** m_arr)
 
-    # Surface conduction: Revil et al. (2017) GJI 208, Eq. (15):
-    #   sigma_s = (1/(F*phi)) * rho_g * beta_plus * (1 - f_stern) * CEC
-    # With saturation scaling S_total^(n-1).
-    # Uses S_total = S_liq + S_vap instead of S_liq alone:
-    # at supercritical conditions "vapor" still wets mineral surfaces.
-    # beta_plus(T) = beta_25 * (1 + alpha * (T - 25)):
-    #   beta_25 = 5.19e-8 m^2/(V.s), alpha = 0.037 /C.
+    # Surface conduction can use either:
+    # - corrected Waxman-Smits / Revil Eq. (16)
+    # - Levy et al. (2018) Eq. (16), used here as the additive
+    #   sigma_surface term in the three-pathway framework of Eq. (13)
+    # - a hybrid split: Levy in clay_cap_regions, Waxman-Smits elsewhere.
     CEC = build_CEC_array(region_n[hm], config)
     rho_g = build_region_property(region_n[hm], config, 'grain_density', n_h)
     f_stern = build_region_property(region_n[hm], config, 'f_stern', n_h)
-
-    alpha = config.get('counterion_temp_coeff', 0.037)
-    beta_25 = config.get('counterion_mobility_25C', 5.19e-8)
-    beta = beta_25 * (1.0 + alpha * (T[hm] - 25.0))
-
+    T_h = T[hm]
     S_total = np.clip(Sliq[hm] + Svap[hm], 0.0, 1.0)
-    sig_surface = ((1.0 / (F * phi_eff))
-                   * (S_total ** (n_arr - 1.0))
-                   * rho_g * beta * (1.0 - f_stern) * CEC)
+
+    surface_model = str(
+        config.get('surface_conduction_model', 'waxman_smits')).lower()
+
+    if surface_model == 'levy':
+        sig_surface = _levy_surface_conductivity(
+            phi_eff, CEC, T_h, m_arr, config)
+    elif surface_model == 'waxman_smits':
+        sig_surface = _waxman_smits_surface_conductivity(
+            phi_eff, F, S_total, n_arr, rho_g, f_stern, CEC, T_h, config)
+    elif surface_model == 'hybrid':
+        clay_cap_regions = [int(rid) for rid in config.get('clay_cap_regions', [])]
+        clay_mask = np.isin(region_n[hm], clay_cap_regions)
+        sig_surface = np.empty(n_h, dtype=float)
+
+        if len(clay_cap_regions) == 0:
+            warnings.warn(
+                "surface_conduction_model='hybrid' but clay_cap_regions is "
+                "empty; falling back to Waxman-Smits everywhere.")
+
+        if np.any(clay_mask):
+            sig_surface[clay_mask] = _levy_surface_conductivity(
+                phi_eff[clay_mask], CEC[clay_mask], T_h[clay_mask],
+                m_arr[clay_mask], config)
+        if np.any(~clay_mask):
+            sig_surface[~clay_mask] = _waxman_smits_surface_conductivity(
+                phi_eff[~clay_mask], F[~clay_mask], S_total[~clay_mask],
+                n_arr[~clay_mask], rho_g[~clay_mask], f_stern[~clay_mask],
+                CEC[~clay_mask], T_h[~clay_mask], config)
+
+        print(f"    Hybrid surface model: Levy on {np.sum(clay_mask)} clay-cap "
+              f"nodes, Waxman-Smits on {np.sum(~clay_mask)} non-clay nodes")
+    else:
+        raise ValueError(
+            f"Unknown surface_conduction_model: '{surface_model}'. "
+            f"Use 'waxman_smits', 'levy', or 'hybrid'.")
 
     # Mixing law: Glover (2010) three-phase or Hashin-Shtrikman
     mixing_law = config.get('mixing_law', 'glover')

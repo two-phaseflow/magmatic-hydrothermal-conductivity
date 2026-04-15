@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-run_conductivity_test.py -- Conductivity analysis using vtu_io + conductivity_lib
+run_conductivity_test.py -- Conductivity analysis using vtu_io + conductivity
 ==================================================================================
 
 Loads a CSMP++ VTU timestep, computes electrical conductivity via the
-production pipeline (conductivity_lib), and plots the result with
+production pipeline (conductivity), and plots the result with
 temperature contours.
 
 Uses:
     vtu_io.run_conductivity  -> end-to-end VTU loading + conductivity
-    conductivity_lib         -> all physics (Watanabe, Sinmyo-Keppler,
+    conductivity         -> all physics (Watanabe, Sinmyo-Keppler,
                                 Archie, surface conduction, melt models)
 
 @author: samuels
@@ -128,10 +128,13 @@ config = {
     },
 
     # --- Salinity floor ---
-    'min_fluid_salinity_wt_percent': 0.1,
+    'min_fluid_salinity_wt_percent': 0.2,
 
     # --- Two-phase fluid mixing ---
     'mixing_law': 'glover',
+
+    # --- Surface conduction model ---
+    'surface_conduction_model': 'hybrid',
 
     # --- Clay cap identification ---
     'clay_cap_regions': [11, 12],

@@ -5,7 +5,7 @@ vtu_io.py -- VTU I/O and conductivity pipeline orchestrator
 ============================================================
 
 Reads CSMP++ VTU output files and feeds them into the conductivity
-pipeline (conductivity_lib.calculate_conductivity_nodal). This module
+pipeline (conductivity.calculate_conductivity_nodal). This module
 handles all VTK I/O and field name mapping; it contains no physics.
 
 Public interface
@@ -23,7 +23,7 @@ conductivity library:
                                |
                           (nodal_data, element_data, coordinates, triangles)
                                |
-    conductivity_lib  <--  run_conductivity
+    conductivity  <--  run_conductivity
                                |
                           calculate_conductivity_nodal(config, ...)
                                |
@@ -33,7 +33,7 @@ VTU field name mapping
 ----------------------
 CSMP++ uses space-separated field names in VTU output (e.g.,
 "saturation liquid"). This module maps them to underscore-separated
-internal keys (e.g., "saturation_liquid") used by conductivity_lib.
+internal keys (e.g., "saturation_liquid") used by conductivity.
 
 The mappings are defined in NODAL_FIELD_MAP and ELEMENT_FIELD_MAP
 at module level. If CSMP++ changes its naming convention, update
@@ -372,7 +372,7 @@ def load_initial_vtu(filename):
 
     These fields are written only to the initial VTU by CSMP++, not
     to timestep VTUs. The returned dict uses keys expected by
-    conductivity_lib._match_porosity and _match_region_ids.
+    conductivity._match_porosity and _match_region_ids.
 
     Parameters
     ----------
@@ -449,7 +449,7 @@ def run_conductivity(timestep_vtu, initial_vtu=None, config=None):
     End-to-end conductivity calculation from VTU files.
 
     Loads the timestep VTU and (optionally) the Initial VTU, then
-    calls conductivity_lib.calculate_conductivity_nodal to compute
+    calls conductivity.calculate_conductivity_nodal to compute
     bulk electrical conductivity at all mesh nodes.
 
     Parameters
@@ -461,7 +461,7 @@ def run_conductivity(timestep_vtu, initial_vtu=None, config=None):
         looks for '*_Initial.vtu' in the same directory.
     config : dict or None
         Conductivity configuration. Merged with
-        conductivity_lib.DEFAULT_CONFIG. See conductivity_lib module
+        conductivity.DEFAULT_CONFIG. See conductivity module
         docstring for available keys.
 
     Returns
