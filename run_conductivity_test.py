@@ -141,7 +141,7 @@ config = {
 
     # --- Intrusion region ---
     'intrusion_id': 1,
-    'spent_magma_min_porosity': 0.05,
+    'spent_magma_min_porosity': 0.02,
 
     # --- Melt domain ---
     'melt_threshold': 0.0
@@ -158,7 +158,7 @@ config = {
 # Load VTU and compute conductivity
 # =============================================================================
 
-timestep_vtu = '../vtus/yuz_homogenized/Variables_25000.vtu'
+timestep_vtu = '../vtus/yuz_homogenized/Variables_30000.vtu'
 initial_vtu = '../vtus/yuz_homogenized/Initial.vtu'
 
 results = run_conductivity(timestep_vtu, initial_vtu, config=config)

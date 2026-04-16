@@ -98,20 +98,38 @@ Mixing laws
 The hydrothermal domain supports two mixing law options
 (config['mixing_law']):
 
-    'glover' (default): Generalized Archie's law (Glover, 2010),
-        applied directly to three phases — rock, liquid, and vapor:
+    'glover' (default): Generalized Archie's law (Glover, 2010,
+        Geophysics 75(6), E247-E265), applied to three phases — rock,
+        liquid, and vapor — with the "conservation of connectedness"
+        unity constraint (Glover 2010 Eq. 2; Glover 2009, TLE 28(1),
+        82-85):
 
-            sigma_bulk = sigma_rock * phi_s^m_s
+            sum_i(phi_i^m_i) = 1
+
+        The bulk conductivity is the sum of per-phase contributions:
+
+            sigma_bulk = sigma_rock * phi_s^m_solid
                        + sigma_liq * phi_liq^m_liq
                        + sigma_vap * phi_vap^m_vap
                        + sigma_surface
 
         where phi_s = 1 - phi, phi_liq = phi * S_liq,
-        phi_vap = phi * S_vap. This is the same framework used in
-        the melt domain (Samrock et al. 2021), ensuring consistency
-        across domains. There is no separate fluid mixing step —
-        liquid and vapor conductivities enter the rock mixing
-        directly with their own volume fractions.
+        phi_vap = phi * S_vap.
+
+        Per-phase cementation exponents follow the Archie convention
+        in which m describes the FLUID pathway through the pore
+        network. The regional m values from the literature (e.g.
+        Revil et al. 2024 m=1.7 for granite; Zhang & Revil 2023 m=2.1
+        for andesite; m=2.2 for clay caps) are therefore assigned to
+        m_liq and m_vap. The rock cementation exponent m_solid is
+        DERIVED from the unity constraint, so the mineral framework's
+        connectedness is physically consistent with the fluid
+        pathways rather than being set equal to m_fluid by convention.
+        This matches the magmatic-domain treatment (Samrock et al.
+        2021 for m_melt, m_vol fixed; m_solid derived from unity),
+        applying the same Glover (2010) framework uniformly across
+        the magmatic-hydrothermal system. See
+        cementation_exponents_hydrothermal.
 
     'hashin_shtrikman': Two-step mixing. First combine liquid and
         vapor via the HS upper bound (assumes brine is the connected
@@ -548,7 +566,7 @@ DEFAULT_CONFIG = {
     'counterion_temp_coeff': 0.037,        # alpha [1/C], linear T dependence
 
     # Levy et al. (2018, GJI 215) parameters
-    # Used when surface_conduction_model = 'levy'.
+    # Used when surface_conduction_model = 'levy' or 'hybrid'
     'levy_CEC_0_meq_per_100g': 91.0,  # pure smectite reference CEC [meq/100g]
     'levy_B_prime': 0.77,             # proportionality constant B' [S/m]
     'levy_alpha_T': 0.040,            # temperature coefficient [1/C]
@@ -686,7 +704,15 @@ def molar_conductivity_watanabe(mu_pas, molality):
     Guards
     ------
     - Viscosity clipped to >= 1e-6 Pa.s to prevent division by zero.
-    - Molality clipped to [0, 30] mol/kg-H2O (upper bound of valid range).
+    - Molality floored at 0 (non-negative) but NOT capped on the high
+      side: magmatic-hydrothermal brines in the V+H (halite-saturating)
+      region can reach salt mass fractions > 0.9, corresponding to
+      m > 150 mol/kg-H2O. The Watanabe (2021) fit was calibrated up to
+      moderate molality, so values beyond ~30 mol/kg are extrapolated.
+      The sigmoidal A(m) and B^{-1}(m) saturate at their asymptotes;
+      the linear C(m) grows unboundedly but its contribution is damped
+      by 1/mu^2. Extrapolation is smooth and preferable to clipping,
+      which would produce step artifacts at the molality boundary.
     - B^{-1} clipped to >= 1e-3 to prevent division by zero at edge cases.
     - Output clipped to >= 1e-12 S.m2/mol to prevent negative values
       from the quadratic term at extreme conditions.
@@ -705,7 +731,7 @@ def molar_conductivity_watanabe(mu_pas, molality):
     """
     p = WATANABE_PARAMS
     mu = np.clip(np.asarray(mu_pas, dtype=float), 1e-6, np.inf)
-    m = np.clip(np.asarray(molality, dtype=float), 0.0, 30.0)
+    m = np.maximum(np.asarray(molality, dtype=float), 0.0)
 
     # Eq. 3: A(m)
     A = p['a1'] + (p['a2'] - p['a1']) / (1.0 + (m / p['a3'])**p['a4'])
@@ -1187,6 +1213,161 @@ def sigma_rock_olhoeft(T_C):
     return max(1e-14, sigma)
 
 
+def sigma_halite(T_C):
+    """
+    Electrical conductivity of pure halite (NaCl) in the intrinsic regime.
+
+    Mapother, D., Crooks, H.N. & Maurer, R. (1950). Self-diffusion of
+    sodium in sodium chloride and sodium bromide. J. Chem. Phys. 18,
+    1231-1236. Eq. (2) with parameters from Table I, Row B (derived
+    from direct conductivity measurements on pure NaCl):
+
+        sigma(T) = (sigma_0 / T_K) * exp(-E_a / (k_B * T_K))
+
+    where
+        E_a = epsilon + epsilon'/2 = 1.89 eV
+            is the activation energy for intrinsic, Schottky-defect-
+            mediated cation migration, and
+        sigma_0 = D_0 * N * e^2 / k_B ~ 5.8e10 S.K/m
+            is obtained from D_0 = 14 cm^2/s (Mapother Table I Row B)
+            via the Einstein relation (sigma/D = N*e^2/(k_B*T)) with
+            N = rho_NaCl * N_A / M_NaCl = 2.23e28 Na+ ions / m^3.
+
+    Consistent with the independent Schottky+Frenkel analysis of
+    Allnatt & Pantelis (1968, Solid State Commun. 6, 309-312), whose
+    defect parameters h = 2.167 eV, Delta_h_1 = 0.658 eV imply
+    E_a = h/2 + Delta_h_1 = 1.74 eV (~8% below Mapother's 1.89 eV;
+    both are within the scatter of different analyses and sample
+    purities).
+
+    Validity
+    --------
+    Intrinsic regime, T > ~350 C. Below this temperature extrinsic
+    divalent-impurity conduction dominates (Mapother Fig. 5, Eq. 5),
+    but this is irrelevant for hydrothermal modeling: halite does
+    not exist as a solid phase in H2O-NaCl systems below the fluid's
+    halite-saturation curve (T > ~300 C at relevant geothermal
+    pressures; Driesner & Heinrich, 2007).
+
+    Magnitude at V+H-relevant temperatures:
+        T = 500 C: sigma ~ 3.5e-5 S/m   (~15x dry silicate rock)
+        T = 600 C: sigma ~ 1.1e-3 S/m   (~35x dry silicate rock)
+        T = 700 C: sigma ~ 9.6e-3 S/m   (~30x dry silicate rock)
+        T = 800 C: sigma ~ 5.2e-2 S/m   (~24x dry silicate rock)
+
+    Parameters
+    ----------
+    T_C : array_like
+        Temperature [deg C].
+
+    Returns
+    -------
+    sigma : ndarray
+        Halite electrical conductivity [S/m].
+    """
+    T_K = np.asarray(T_C, dtype=float) + 273.15
+    sigma_0 = 5.8e10        # S.K/m  (= D_0 * N * e^2 / k_B)
+    E_a_eV = 1.89           # Mapother Table I Row B
+    k_B_eV = 8.617333e-5    # eV/K
+    return (sigma_0 / T_K) * np.exp(-E_a_eV / (k_B_eV * T_K))
+
+
+def sigma_solid_phase(T_C, phi, S_halite=None, sigma_rock=None):
+    """
+    Effective conductivity of the solid phase (silicate rock + halite).
+
+    In most of the hydrothermal domain the solid phase is just
+    silicate rock matrix (sigma = sigma_rock from sigma_rock_olhoeft,
+    Watanabe 2022 Eq. 2). In the vapor-halite coexistence region
+    where halite precipitates (saturation_halite > 0, from the
+    coupled H2O-NaCl equation of state), the solid phase is a
+    mixture of rock and halite precipitate. This helper returns the
+    arithmetic volume-weighted average:
+
+        sigma_solid = f_rock * sigma_rock + f_halite * sigma_halite
+
+    where the fractions are taken within the total solid phase:
+
+        phi_solid = (1 - phi) + phi * S_halite
+        f_rock    = (1 - phi)       / phi_solid
+        f_halite  = (phi * S_halite) / phi_solid
+
+    Arithmetic (parallel / upper Wiener bound) weighting is used
+    because the Glover unity-constraint already captures the
+    geometric connectedness of the solid phase as a whole through
+    phi_solid^m_solid; what we need here is the material-weighted
+    "internal" conductivity of that phase.
+
+    Halite conductivity exceeds dry silicate by ~15-35x in the
+    500-800 C range (see sigma_halite), and halite volume fraction
+    can approach unity as the vapor phase dries out in the V+H
+    region, so the correction is non-negligible there. Below
+    ~400 C the two are within a factor of 2 and the correction
+    is small.
+
+    Efficiency
+    ----------
+    sigma_halite() is evaluated only at nodes where S_halite > 0.
+    In typical simulations this is a small subset (a few percent of
+    hydrothermal nodes). Nodes with S_halite = 0 pass through as
+    sigma_rock with no additional computation.
+
+    Parameters
+    ----------
+    T_C : array_like
+        Temperature per node [deg C].
+    phi : array_like
+        Porosity per node (original, NOT halite-reduced phi_eff).
+    S_halite : array_like or None, optional
+        Halite saturation per node (fraction of pore volume occupied
+        by halite). If None or all zero, no halite contribution.
+    sigma_rock : array_like or None, optional
+        Pre-computed silicate rock conductivity per node [S/m]. If
+        None, sigma_rock_olhoeft(T_C) is called internally.
+
+    Returns
+    -------
+    sigma_solid : ndarray
+        Effective solid-phase conductivity per node [S/m]. Same
+        shape as T_C.
+    """
+    T_C_arr = np.asarray(T_C, dtype=float)
+    phi_arr = np.asarray(phi, dtype=float)
+
+    if sigma_rock is None:
+        sigma_rock_arr = sigma_rock_olhoeft(T_C_arr)
+    else:
+        sigma_rock_arr = np.asarray(sigma_rock, dtype=float)
+
+    # No halite anywhere -> pure silicate
+    if S_halite is None:
+        return sigma_rock_arr.copy()
+
+    S_halite_arr = np.asarray(S_halite, dtype=float)
+    has_halite = S_halite_arr > 0.0
+    if not np.any(has_halite):
+        return sigma_rock_arr.copy()
+
+    # Compute halite conductivity ONLY where needed
+    sigma_solid = sigma_rock_arr.copy()
+    T_hal = T_C_arr[has_halite]
+    phi_hal = phi_arr[has_halite]
+    S_hal = S_halite_arr[has_halite]
+
+    # Volume fractions within the solid phase
+    phi_solid = (1.0 - phi_hal) + phi_hal * S_hal
+    phi_solid_safe = np.clip(phi_solid, 1e-6, 1.0)
+    f_halite = (phi_hal * S_hal) / phi_solid_safe
+    f_halite = np.clip(f_halite, 0.0, 1.0)
+    f_rock = 1.0 - f_halite
+
+    sigma_solid[has_halite] = (
+        f_rock * sigma_rock_arr[has_halite]
+        + f_halite * sigma_halite(T_hal))
+
+    return sigma_solid
+
+
 # =============================================================================
 # SECTION 5: MELT CONDUCTIVITY MODELS
 # =============================================================================
@@ -1666,6 +1847,107 @@ def cementation_exponents_samrock(phi_solid, phi_melt, phi_vol):
     m_solid = np.clip(np.log(G_rest) / np.log(safe_phi), 1.3, 3.0)
 
     return m_solid, m_melt, m_vol
+
+
+def cementation_exponents_hydrothermal(phi_solid, phi_liq, phi_vap,
+                                       m_fluid):
+    """
+    Three-phase cementation exponents for the hydrothermal domain.
+
+    Glover (2009, The Leading Edge 28(1), 82-85) interprets the
+    cementation exponent m as a measure of the connectedness G = phi^m
+    of each phase: low m means high connectedness, high m means low
+    connectedness. In a multi-phase conducting system (Glover et al.,
+    2000, EPSL 180, 369-383; Glover, 2010, Geophysics 75(6), E247-E265),
+    the cementation exponents of the phases are not independent — they
+    are linked by the "conservation of connectedness" constraint
+    (Glover, 2010, Eq. 2):
+
+        sum_i(phi_i^m_i) = 1
+
+    which expresses the physical requirement that the phases together
+    fill the sample and share its electrical pathways.
+
+    In the Archie convention, the cementation exponent of a porous
+    rock describes the pathway through the FLUID phase (the brine
+    occupying the pore network). Published regional values
+    (e.g. Revil et al. 2024: m = 1.7 for granite; Zhang & Revil 2023:
+    m = 2.1 for andesite; m = 2.2 for smectite-rich clay) are all
+    fluid cementation exponents. The rock matrix, being a continuous
+    mineral framework, has its own degree of connectedness that must
+    be derived so the unity constraint is satisfied.
+
+    This helper therefore sets:
+
+        m_liq   = m_fluid           (regional, from config)
+        m_vap   = m_fluid           (same pore network)
+        m_solid = log(1 - phi_liq^m_liq - phi_vap^m_vap) / log(phi_solid)
+
+    which is the hydrothermal analogue of the magmatic routine
+    `cementation_exponents_samrock`, and applies the same Glover (2010)
+    conservation-of-connectedness principle uniformly across the
+    magmatic-hydrothermal system.
+
+    Parameters
+    ----------
+    phi_solid : array_like
+        Rock volume fraction [0-1], = 1 - phi.
+    phi_liq : array_like
+        Liquid volume fraction [0-1], = phi * S_liq.
+    phi_vap : array_like
+        Vapor volume fraction [0-1], = phi * S_vap.
+    m_fluid : array_like
+        Regional fluid cementation exponent [-], typically 1.5-2.3.
+
+    Returns
+    -------
+    m_solid : ndarray
+        Solid (rock) cementation exponent, derived from unity.
+        Clipped to [0.01, 3.0] for numerical safety.
+    m_liq : ndarray
+        Liquid cementation exponent, = m_fluid.
+    m_vap : ndarray
+        Vapor cementation exponent, = m_fluid.
+
+    Notes
+    -----
+    - For a fully saturated rock (phi_vap = 0), the constraint reduces
+      to the two-phase form (Glover 2009, Eqs. 3-4):
+          phi^m_liq + (1-phi)^m_solid = 1
+    - Typical m_solid values are near zero (well-connected mineral
+      framework), reflecting the physical fact that the rock matrix
+      forms a continuous solid.
+    - G_rest (= 1 - G_liq - G_vap) is floored to 1e-12 to avoid log(0)
+      at fully fluid-saturated, infinitesimally-porous edge cases.
+    - phi_solid is floored to 1e-6 before the logarithm to avoid
+      division by log(0) at the fluid-only limit. Such nodes are not
+      physically meaningful in the hydrothermal domain.
+    """
+    phi_solid = np.asarray(phi_solid, float)
+    phi_liq = np.asarray(phi_liq, float)
+    phi_vap = np.asarray(phi_vap, float)
+    m_fluid = np.asarray(m_fluid, float)
+
+    phase_sum = phi_solid + phi_liq + phi_vap
+    bad_sum = np.abs(phase_sum - 1.0) > 0.01
+    if np.any(bad_sum):
+        warnings.warn(
+            f"cementation_exponents_hydrothermal: "
+            f"{int(np.sum(bad_sum))} nodes with "
+            f"phi_solid + phi_liq + phi_vap != 1.0 "
+            f"(max deviation: "
+            f"{float(np.max(np.abs(phase_sum - 1.0))):.3f})")
+
+    m_liq = m_fluid
+    m_vap = m_fluid
+
+    G_liq = np.power(np.clip(phi_liq, 0.0, 1.0), m_liq)
+    G_vap = np.power(np.clip(phi_vap, 0.0, 1.0), m_vap)
+    G_rest = np.clip(1.0 - G_liq - G_vap, 1e-12, 1.0)
+    safe_phi = np.clip(phi_solid, 1e-6, 1.0)
+    m_solid = np.clip(np.log(G_rest) / np.log(safe_phi), 0.01, 3.0)
+
+    return m_solid, m_liq, m_vap
 
 
 def archie_three_phase(sigma_solid, sigma_melt, sigma_vol,
@@ -2373,19 +2655,29 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
 
     Two mixing law options (config['mixing_law']):
 
-    'glover' (default): Generalized Archie's law (Glover, 2010),
-        applied directly to three phases (rock, liquid, vapor):
+    'glover' (default): Generalized Archie's law (Glover, 2010,
+        Geophysics 75(6), E247-E265), applied to three phases
+        (rock, liquid, vapor) with the conservation-of-connectedness
+        unity constraint (Glover 2010, Eq. 2; Glover 2009, TLE 28(1),
+        82-85):
 
-            sigma_bulk = sigma_rock * phi_s^m_s
+            sum_i(phi_i^m_i) = 1
+
+        The bulk conductivity is:
+
+            sigma_bulk = sigma_rock * phi_s^m_solid
                        + sigma_liq * phi_liq^m_liq
                        + sigma_vap * phi_vap^m_vap
                        + sigma_surface
 
         where phi_s = 1 - phi_eff, phi_liq = phi_eff * S_liq,
-        phi_vap = phi_eff * S_vap. Cementation exponents from the
-        unity constraint (Glover 2010, Eq. 2). This is the same
-        framework used in the melt domain (Samrock et al. 2021),
-        ensuring consistency across domains.
+        phi_vap = phi_eff * S_vap. Regional m values (m_arr, from
+        config) are Archie fluid cementation exponents and are used
+        as m_liq and m_vap. The rock cementation exponent m_solid is
+        derived from the unity constraint via
+        cementation_exponents_hydrothermal. This matches the
+        magmatic-domain treatment in cementation_exponents_samrock,
+        applying the same Glover framework across both domains.
 
     'hashin_shtrikman': Two-step mixing. First combine liquid and
         vapor via the HS upper bound (assumes brine is the connected
@@ -2539,32 +2831,39 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
     mixing_law = config.get('mixing_law', 'glover')
 
     if mixing_law == 'glover':
-        # Generalized Archie (Glover 2010): three phases directly.
-        # Phase volume fractions:
+        # Generalized Archie (Glover, 2010, Geophysics 75(6), E247-E265):
+        # three phases (rock, liquid, vapor) mixed additively, with the
+        # per-phase cementation exponents linked by the "conservation
+        # of connectedness" constraint sum_i(phi_i^m_i) = 1
+        # (Glover 2010 Eq. 2; Glover et al. 2000, EPSL 180, 369-383;
+        # Glover 2009, TLE 28(1), 82-85).
+        #
+        # Regional m values (m_arr) are Archie cementation exponents
+        # describing the FLUID pathway through the pore network, so
+        # they are used as m_liq and m_vap. The rock cementation
+        # exponent m_solid is then derived from the unity constraint,
+        # matching the magmatic-domain treatment in
+        # cementation_exponents_samrock.
         phi_solid_h = 1.0 - phi_eff
         phi_liq_h = phi_eff * Sliq[hm]
         phi_vap_h = phi_eff * Svap[hm]
 
-        # Cementation exponents: m for rock is from config/region.
-        # For fluid phases, use m_liq = m_vap = m (same connectivity
-        # assumption as standard Archie). The saturation exponent n
-        # is absorbed: phi_fluid^m = (phi*S)^m, which differs from
-        # the traditional (phi^m)*(S^n) when m != n. To preserve
-        # standard Archie behavior, we use the identity:
-        #   (1/F) * S^n * sigma = sigma * phi^m * S^n
-        #                       = sigma * (phi*S)^m * S^(n-m)
-        # For simplicity and consistency with the melt domain, we
-        # use the direct Glover form with a single exponent per phase.
-        m_solid_h = m_arr  # same cementation exponent
-        m_liq_h = m_arr
-        m_vap_h = m_arr
+        m_solid_h, m_liq_h, m_vap_h = cementation_exponents_hydrothermal(
+            phi_solid_h, phi_liq_h, phi_vap_h, m_arr)
 
-        # Compute phase contributions
+        # Compute phase contributions (connectednesses G_i = phi_i^m_i)
         Gs = np.power(np.clip(phi_solid_h, 0.0, 1.0), m_solid_h)
         Gl = np.power(np.clip(phi_liq_h, 1e-10, 1.0), m_liq_h)
         Gv = np.power(np.clip(phi_vap_h, 1e-10, 1.0), m_vap_h)
 
-        sigma_bulk_hydro = (sigma_rock[hm] * Gs
+        # Effective solid-phase conductivity: silicate rock + halite
+        # precipitate where S_halite > 0 (Mapother et al. 1950). Most
+        # nodes have S_halite = 0 and pass through as sigma_rock; see
+        # sigma_solid_phase for details.
+        sigma_solid_h = sigma_solid_phase(
+            T[hm], phi_h[hm], S_halite=Shal_h, sigma_rock=sigma_rock[hm])
+
+        sigma_bulk_hydro = (sigma_solid_h * Gs
                           + sig_liq[hm] * Gl
                           + sig_vap[hm] * Gv
                           + sig_surface)
