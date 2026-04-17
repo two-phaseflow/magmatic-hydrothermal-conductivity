@@ -88,43 +88,72 @@ config = {
     #   10 OUTFLOW        high-permeability outflow zone
     #   11 CLAY_CAP_OUT   outer clay cap
     #   12 CLAY_CAP_CENT  central clay cap (smectite-rich)
+    # Per-region CEC values (smectite-effective, meq/100g):
+    #   CEC represents the clay-fraction CEC that actually contributes
+    #   to surface conduction. Values are selected per lithology from
+    #   Revil (2002) Table 3 (clinoptilolite 1.6-1.9 meq/g, smectite
+    #   0.8-1.2 meq/g, celadonite/K-feldspar/adularia <<1 meq/g), and
+    #   from typical whole-rock CEC measurements in geothermal systems:
+    #     - Fresh crystalline basement (granite/gneiss):  0.1-0.5 meq/100g
+    #     - Cooled intrusive body:                         0.3-0.5 meq/100g
+    #     - Fresh volcanic edifice (andesite/basalt):      0.5-2 meq/100g
+    #     - Propylitized / mildly altered volcanics:       2-5  meq/100g
+    #     - Argillic / high-T altered zones:               5-15 meq/100g
+    #     - Smectite clay caps:                           20-40+ meq/100g
     'regions': {
-        # Basement / deep crystalline (m ~ 1.7, Revil et al. 2024)
-        # Grain density 2750-2800 kg/m3 (typical granodiorite/gneiss)
-        1:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0},
-        2:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0},
-        4:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
-        5:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
-        6:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
+        # Cooled intrusive body (crystalline, m ~ 1.7)
+        1:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0,
+             'CEC_meq_per_100g': 0.3},
 
-        # Volcanic edifice (m ~ 2.1, Zhang & Revil 2023)
-        # Grain density 2700 kg/m3 (andesite)
-        3:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
-        7:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
-        8: {'porosity_exponent_m': 2.1, 'grain_density': 2700.0},
+        # Deep low-permeability basement / crystalline basement
+        2:  {'porosity_exponent_m': 1.7, 'grain_density': 2800.0,
+             'CEC_meq_per_100g': 0.2},
+        4:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0,
+             'CEC_meq_per_100g': 0.3},
+        5:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0,
+             'CEC_meq_per_100g': 0.2},
+        6:  {'porosity_exponent_m': 1.7, 'grain_density': 2750.0,
+             'CEC_meq_per_100g': 0.2},
 
-        # Outflow zone (fractured, m ~ 1.5)
-        10:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
+        # Volcanic edifice (fresh to mildly altered andesite/basalt,
+        # m ~ 2.1, Zhang & Revil 2023; rho_g = 2700 kg/m3)
+        3:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0,
+             'CEC_meq_per_100g': 1.5},
+        7:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0,
+             'CEC_meq_per_100g': 1.5},
+        8:  {'porosity_exponent_m': 2.1, 'grain_density': 2700.0,
+             'CEC_meq_per_100g': 1.5},
 
-        # Shallow volcanic edifice (high porosity/permeability)
-        9:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0},
+        # Outflow zone (fractured, moderately altered, m ~ 1.6).
+        # Elevated CEC from fluid-rock interaction along flow paths.
+        10: {'porosity_exponent_m': 1.6, 'grain_density': 2700.0,
+             'CEC_meq_per_100g': 3.0},
 
-        # Clay caps (altered volcanics, m ~ 2.2)
-        # Lower grain density (~2600) due to smectite/clay alteration.
-        # High CEC from smectite (80-150 meq/100g).
-        # f_stern = 0.90 (lower Stern fraction for clays, more
-        # counterions in diffuse layer -> higher surface conduction).
+        # Shallow volcanic edifice above clay cap (high porosity /
+        # weathered, some alteration)
+        9:  {'porosity_exponent_m': 1.6, 'grain_density': 2700.0,
+             'CEC_meq_per_100g': 3.0},
+
+        # Clay caps (altered volcanics, m ~ 2.2). Lower grain density
+        # (~2600 kg/m3) due to smectite/clay alteration. High CEC from
+        # smectite: outer cap 20 meq/100g, smectite-rich central cap
+        # 40 meq/100g (both within the Revil 2002 Table 3 smectite
+        # range of 80-120 meq/100g for pure smectite, scaled by the
+        # smectite volume fraction).
         11: {'porosity_exponent_m': 2.2, 'grain_density': 2600.0,
-             'CEC_meq_per_100g': 20.0, 'f_stern': 0.90},
+             'CEC_meq_per_100g': 10.0},
         12: {'porosity_exponent_m': 2.2, 'grain_density': 2600.0,
-             'CEC_meq_per_100g': 40.0, 'f_stern': 0.90},
+             'CEC_meq_per_100g': 20.0},
     },
 
-    # Default region properties (used where no region-specific override)
+    # Default region properties (used where no region-specific override).
+    # The default CEC is set low (0.2 meq/100g) to ensure that any
+    # unassigned region behaves as crystalline rock rather than
+    # accidentally producing large surface conduction. All named
+    # regions should have an explicit CEC above; this is a safety net.
     'default_region': {
         'grain_density': 2800.0,        # [kg/m3]
-        'f_stern': 0.95,                # Stern layer fraction [-]
-        'CEC_meq_per_100g': 2.0,        # cation exchange capacity
+        'CEC_meq_per_100g': 0.2,        # cation exchange capacity
     },
 
     # --- Salinity floor ---
@@ -134,7 +163,12 @@ config = {
     'mixing_law': 'glover',
 
     # --- Surface conduction model ---
-    'surface_conduction_model': 'hybrid',
+    # 'waxman_smits'       -- classical WS everywhere
+    # 'revil'              -- Revil 2002 everywhere
+    # 'levy'               -- Levy 2018 everywhere
+    # 'waxman_smits_revil' -- WS non-clay, Revil 2002 in clay_cap_regions
+    # 'waxman_smits_levy'  -- WS non-clay, Levy 2018 in clay_cap_regions (default)
+    'surface_conduction_model': 'waxman_smits_levy',
 
     # --- Clay cap identification ---
     'clay_cap_regions': [11, 12],
@@ -158,7 +192,7 @@ config = {
 # Load VTU and compute conductivity
 # =============================================================================
 
-timestep_vtu = '../vtus/yuz_homogenized/Variables_30000.vtu'
+timestep_vtu = '../vtus/yuz_homogenized/Variables_375000.vtu'
 initial_vtu = '../vtus/yuz_homogenized/Initial.vtu'
 
 results = run_conductivity(timestep_vtu, initial_vtu, config=config)

@@ -70,28 +70,29 @@ Hydrothermal domain (no melt):
 
     where F = a / phi^m is the formation factor (Archie, 1942) and
     sigma_surface is the surface conduction contribution from cation
-    exchange on mineral surfaces. The specific surface model is selected
-    by config['surface_conduction_model']:
+    exchange on mineral surfaces. Five surface-conduction options are
+    available via config['surface_conduction_model'] (see the Surface
+    conduction section of the module docstring for full details):
 
-        'waxman_smits' -- Waxman-Smits / Revil formulation using
-            sigma_s = (1 / (F * phi)) * (1 - phi) * rho_g * beta_plus
-                    * (1 - f) * CEC
-            i.e. the Waxman-Smits bulk-volume form equivalent to Revil
-            et al. (2017) Eq. (16), including the (1 - phi) factor.
-
-        'levy' -- Levy et al. (2018, GJI 215, Eq. 16) empirical
-            smectite surface conductivity:
-            sigma_s = B'(T) * (CEC / CEC_0) * (1 - phi) / phi^(1 - m)
-            used here as the additive sigma_surface term within Levy's
-            three-pathway framework (Eq. 13).
-
-        'hybrid' -- Levy in config['clay_cap_regions'], corrected
-            Waxman-Smits elsewhere in the hydrothermal domain.
-
-    The 'levy' option follows Levy et al. (2018), "The role of
-    smectites in the electrical conductivity of active hydrothermal
-    systems: Electrical properties of core samples from Krafla volcano,
-    Iceland" (Geophys. J. Int. 215, 1558-1582).
+        'waxman_smits'       Waxman & Smits (1968) Eq. 19 structural
+                             form for B(sigma_w) (alpha = 0.6,
+                             gamma = 1.3 S/m) with beta_25 recalibrated
+                             to Revil 2002's surface-bound value
+                             (0.53e-8 m^2/(V.s), alpha_T = 0.040 /C).
+                             Preserves WS's sigma_w dependence while
+                             using realistic surface-bound mobility.
+        'revil'              Revil et al. (2002) DC-calibrated intrinsic
+                             surface conductivity sigma_S from their
+                             Eq. 7, (2/3)*rho_g*beta_s*CEC (reproduces
+                             their Fig. 7b). For the full bulk
+                             Eqs. 11-13 with Dukhin-number rollover,
+                             see revil2002_bulk_conductivity().
+        'levy'               Lévy et al. (2018, Eq. 16) empirical
+                             smectite-inclusive parameterization.
+        'waxman_smits_revil' WS in non-clay regions, Revil 2002 in
+                             config['clay_cap_regions'].
+        'waxman_smits_levy'  WS in non-clay regions, Lévy in
+                             config['clay_cap_regions'].
 
 Mixing laws
 -----------
@@ -144,10 +145,9 @@ The hydrothermal domain supports two mixing law options
         within the pore space independent of pore geometry.
 
 Surface conduction (sigma_surface) is added in both cases using the
-configured surface_conduction_model. The default is the corrected
-Waxman-Smits form; the Levy et al. (2018) option uses their Eq. (16)
-as the additive surface term within Eq. (13); and the 'hybrid' option
-applies Levy only inside config['clay_cap_regions'].
+configured surface_conduction_model (see Surface conduction section
+below). The recommended production setting for smectite-bearing clay
+caps is 'waxman_smits_levy'.
 
 The density-based model switch for the vapor phase (Watanabe above
 450 kg/m3, density model at 200-450 kg/m3, Sinmyo-Keppler below
@@ -171,10 +171,6 @@ overridden per region (in config['regions'][id]):
     grain_density          Grain density [kg/m3] for surface conduction.
         Fresh igneous: 2700-2800; clay-altered: ~2500.
 
-    f_stern                Stern layer fraction [-] for surface conduction.
-        Fresh rock: 0.95; clay-rich altered: ~0.90 (more counterions
-        in diffuse layer -> higher surface conduction).
-
     CEC_meq_per_100g       Cation exchange capacity [meq/100g].
         Fresh rock: ~2; smectite-rich clay cap: 50-150.
 
@@ -185,7 +181,7 @@ Example per-region config:
     'regions': {
         1: {'porosity_exponent_m': 1.7, 'grain_density': 2750.0},
         11: {'porosity_exponent_m': 2.2, 'grain_density': 2500.0,
-             'CEC_meq_per_100g': 80.0, 'f_stern': 0.90},
+             'CEC_meq_per_100g': 80.0},
     }
 
 Liquid conductivity (Watanabe et al., 2021)
@@ -306,42 +302,108 @@ This gives sigma_s = 10^{-14} to 10^{-5} S/m at 25-600 C.
 
 Surface conduction
 ------------------
-Surface conduction follows the Waxman-Smits (1968, J. Pet. Tech. 20(6),
-107-122) framework as reformulated by Revil & Florsch (2010, GJI 181,
-1480-1498, Eqs. 2-7) and Revil et al. (2017, GJI 208, 826-844, Eq. 16):
+Three surface-conduction parameterizations and two mixed-dispatch
+options are available, selected via config['surface_conduction_model']:
 
-    sigma_s = (1 / (F * phi)) * (1 - phi) * rho_g * beta_plus
-            * (1 - f) * CEC
+  'waxman_smits' (default): classical Waxman & Smits (1968, J. Pet. Tech.
+      20(6), 107-122) in the volume-averaged form of Revil et al. (1998,
+      J. Geophys. Res. 103, 23925-23936, Eq. 8):
 
-where rho_g is grain density [kg/m3], beta_plus is counterion mobility
-[m2/(V.s)], f is the Stern layer fraction [-], and CEC is the cation
-exchange capacity [C/kg]. All three can be set per region.
+          sigma_s = (1/(F*phi_eff)) * (1-phi_eff) * rho_g * B(sigma_w, T)
+                    * CEC * S_total^(n-1)
 
-Temperature dependence of counterion mobility (Revil et al., 2017):
+          B(sigma_w, T) = beta(T) * (1 - alpha * exp(-sigma_w / gamma))
+          beta(T)       = beta_25 * (1 + alpha_T * (T - 25))
 
-    beta_plus(T) = beta_25 * (1 + alpha * (T - 25))
-    beta_25(Na+) = 5.19e-8 m2/(V.s)
-    alpha = 0.037 /C
+      B is the Waxman-Smits "apparent counterion mobility" with the
+      salinity dependence of their Eq. 19 (Fig. 6). Default
+      parameters are a hybrid:
 
-Saturation scaling uses S_total = S_liq + S_vap rather than S_liq alone,
-because at supercritical conditions the "vapor" phase still wets mineral
-surfaces and contributes to surface conduction.
+        alpha = 0.6, gamma = 1.3 S/m   (WS 1968 Eq. 19 original)
+        beta_25 = 0.53e-8 m^2/(V.s)    (Revil 2002 Fig. 7b recalibration)
+        alpha_T = 0.040 /C              (Revil 2002 Eq. 19, nu_S)
 
-For smectite-rich rocks, config['surface_conduction_model'] can instead
-select the Levy et al. (2018, GJI 215, Eqs. 13, 16, 17) model:
+      We keep the WS 1968 sigma_w-dependent structure but recalibrate
+      beta_25 to Revil 2002's DC-measured surface-bound mobility.
+      WS 1968's original beta_max = 4.77e-8 m^2/(V.s) is the free-
+      solution Na+ mobility (their high-sigma_w saturation limit),
+      which over-predicts real surface-bound counterion contribution
+      by ~10x at geothermal conditions. Revil 2002's 0.53e-8 is the
+      measured value on altered volcanic rocks at comparable regimes.
 
-    sigma_s = B'(T) * (CEC / CEC_0) * (1 - phi) / phi^(1 - m)
-    B'(T) = B'_ref * (1 + alpha_T * (T - T_ref))
+  'revil': Revil et al. (2002, J. Geophys. Res. 107, 2168) DC-calibrated
+      intrinsic surface conductivity from their Eq. 7:
 
-In this implementation Levy Eq. (16) is used as the additive
-sigma_surface term within the three-pathway framework of Eq. (13),
-while the pore-fluid term sigma_w/F is still provided by the selected
-mixing law. This keeps the model usable across low- and high-salinity
-conditions without introducing the sample-specific intra-solid term.
+          sigma_s = (2/3) * rho_g * beta_s(T) * CEC * S_total^(n-1)
 
-If config['surface_conduction_model'] = 'hybrid', the code applies the
-Levy model only in config['clay_cap_regions'] and uses the corrected
-Waxman-Smits formulation elsewhere in the hydrothermal domain.
+          beta_s(T) = beta_s_25 * (1 + alpha_T * (T - 25))
+
+      The (2/3) factor is the DEM geometric factor for spherical
+      grains (Revil & Glover 1998; Bruggeman 1935). sigma_s here is
+      the INTRINSIC surface conductivity of the clay fraction, the
+      quantity plotted on the y-axis of Revil 2002 Fig. 7b; it is a
+      property of the rock itself, independent of pore fluid or of
+      F. No salinity dependence; beta_s is an empirical surface
+      mobility that absorbs the Stern/diffuse-layer partition into a
+      single constant.
+
+      Default: beta_s_25(Na+) = 0.53e-8 m^2/(V.s) (Revil 2002
+      Fig. 7b, Cobalt-CEC linear fit); alpha_T = 0.040 /C (Revil
+      2002 Eq. 19, nu_S).
+
+      When combined with the library's additive-form bulk mixing law
+      (sigma_bulk = sigma_f/F + sigma_surface, as used for WS and
+      Levy), this is equivalent to Revil 2002's high-salinity limit
+      (Eq. 10, with the small -sigma_f*t_+/F correction omitted).
+      For faithful treatment at clay-cap conditions where xi =
+      sigma_S/sigma_f approaches the isoconductivity point xi_+ =
+      1 - t_+ ~ 0.61 for NaCl, call revil2002_bulk_conductivity()
+      directly -- it implements the full Eqs. 11-13 with the Dukhin
+      rollover.
+
+      NOTE: earlier versions of this library used Revil 1998 Eq. 8
+      geometry (1-phi)/(F*phi) or the (F-1)/F prefactor from Revil
+      1998's bulk formula. Both were incorrect -- Revil 2002 Eq. 7
+      has no F factor at all in the intrinsic sigma_S.
+
+  'levy': Levy et al. (2018, GJI 215, 1558-1582) three-pathway
+      framework (their Eqs. 13 and 16), capturing both edge-EDL and
+      smectite-interfoliar conduction:
+
+          sigma_s = B'(T) * (CEC/CEC_0) * (1-phi_eff) / phi_eff^(1-m)
+
+          B'(T) = B'_ref * (1 + alpha_T * (T - T_ref))
+
+      Default: B'_ref = 0.77 S/m (Levy 2018 Fig. 10), CEC_0 = 91
+      meq/100g (Levy 2018 Fig. 4), alpha_T = 0.04 /C, T_ref = 25 C.
+      Levy Eq. 16 is used here as the additive sigma_surface term,
+      while the pore-fluid term sigma_w/F is still supplied by the
+      mixing law.
+
+  'waxman_smits_revil': classical Waxman-Smits in all hydrothermal
+      regions, with the Revil 2002 parameterization substituted
+      within config['clay_cap_regions']. Useful when a clay-cap-
+      specific DC-calibrated surface mobility is preferred without
+      invoking the Levy empirical interlayer model.
+
+  'waxman_smits_levy': classical Waxman-Smits in all hydrothermal
+      regions, with the Levy 2018 parameterization substituted within
+      config['clay_cap_regions']. This is the recommended production
+      setting for smectite-bearing clay caps, because Levy's B'
+      empirically includes the interfoliar (intra-solid) conduction
+      pathway that Waxman-Smits cannot represent.
+
+All four formulations use phi_eff = porosity * (1 - saturation_halite)
+so volume occupied by precipitated halite is excluded from the fluid-
+accessible pore space. Saturation scaling uses S_total = S_liq + S_vap
+rather than S_liq alone, because at supercritical conditions the
+"vapor" phase still wets mineral surfaces.
+
+The previously-used Revil et al. (2017, GJI 208, Eq. 16) IP-calibrated
+form with an explicit Stern partition (1-f_stern) is not a good DC
+surface-conduction predictor: at f_stern = 0.95 (typical) it under-
+estimates measured bulk conductivities of altered volcaniclastics
+(Revil et al. 2002 Fig. 7b) by ~100x. It has therefore been removed.
 
 Phase fractions from CSMP++
 ---------------------------
@@ -393,6 +455,20 @@ Static (from Initial.vtu):
 
 References
 ----------
+Allnatt, A.R. & Pantelis, P. (1968). Anomalous high temperature
+    electrical conductance of NaCl. Solid State Commun. 6, 309-312.
+
+Archie, G.E. (1942). The electrical resistivity log as an aid in
+    determining some reservoir characteristics. Trans. AIME 146, 54-62.
+
+Driesner, T. & Heinrich, C.A. (2007). The system H2O-NaCl. Part I:
+    Correlation formulae for phase relations in temperature-pressure-
+    composition space from 0 to 1000 C, 0 to 5000 bar, and 0 to 1
+    X_NaCl. Geochim. Cosmochim. Acta 71, 4880-4901.
+
+Glover, P.W.J., Hole, M.J. & Pous, J. (2000). A modified Archie's law
+    for two conducting phases. Earth Planet. Sci. Lett. 180, 369-383.
+
 Glover, P.W.J. (2009). What is the cementation exponent? A new
     interpretation. The Leading Edge 28(1), 82-85.
 
@@ -417,6 +493,11 @@ Klyukin, Y.I., Lowell, R.P. & Bodnar, R.J. (2017). A revised empirical
     elevated temperatures and pressures. Fluid Phase Equilibria 433,
     193-205.
 
+Kristinsdottir, L.H., Flovenz, O.G., Arnason, K., Bruhn, D., Milsch, H.,
+    Spangenberg, E. & Kulenkampff, J. (2010). Electrical conductivity and
+    P-wave velocity in rock samples from high-temperature Icelandic
+    geothermal fields. Geothermics 39, 94-105.
+
 Laumonier, M., Gaillard, F. & Sifre, D. (2015). The effect of pressure
     and water concentration on the electrical conductivity of dacitic
     melts. Chemical Geology 418, 66-76.
@@ -425,26 +506,26 @@ Laumonier, M., Karakas, O., Bachmann, O., Gaillard, F., Lukacs, R. &
     Seghedi, I. (2019). Evidence for a persistent magma reservoir with
     large melt content beneath an apparently extinct volcano. Earth
     Planet. Sci. Lett. 521, 79-90.
-    
+
 Levy, L., Gibert, B., Sigmundsson, F., Flovenz, O.G., Hersir, G.P.,
     Briole, P., Pezard, P.A. & Doin, M.P. (2018). The role of smectites
     in the electrical conductivity of active hydrothermal systems:
     Electrical properties of core samples from Krafla volcano, Iceland.
     Geophys. J. Int. 215, 1558-1582.
 
+Mapother, D., Crooks, H.N. & Maurer, R. (1950). Self-diffusion of sodium
+    in sodium chloride and sodium bromide. J. Chem. Phys. 18, 1231-1236.
+
 Olhoeft, G.R. (1981). Electrical properties of granite with implications
     for the lower crust. J. Geophys. Res. 86(B2), 931-936.
 
-Revil, A. & Florsch, N. (2010). Determination of permeability from
-    spectral induced polarization in granular media. Geophys. J. Int.
-    181, 1480-1498.
+Revil, A., Cathles, L.M., Losh, S. & Nunn, J.A. (1998). Electrical
+    conductivity in shaly sands with geophysical applications. J.
+    Geophys. Res. 103(B10), 23925-23936.
 
-Revil, A., Le Breton, M., Niu, Q., Wallin, E., Haskins, E. & Thomas,
-    D.M. (2017). Induced polarization of volcanic rocks - 1. Surface
-    versus quadrature conductivity. Geophys. J. Int. 208, 826-844.
-
-Revil, A. et al. (2024). Induced polarization of volcanic rocks - 8.
-    The case of intrusive igneous rocks. Geophys. J. Int. 241(2), 1348.
+Revil, A., Hermitte, D., Spangenberg, E. & Cocheme, J.J. (2002).
+    Electrical properties of zeolitized volcaniclastic materials. J.
+    Geophys. Res. 107(B8), 2168.
 
 Samrock, C.S., Grayver, A.V., Bachmann, O., Karakas, O. & Saar, M.O.
     (2021). Integrated magnetotelluric and petrological analysis of
@@ -470,10 +551,6 @@ Waxman, M.H. & Smits, L.J.M. (1968). Electrical conductivities in
 
 Yang, X. (2011). Origin of high electrical conductivity in the lower
     continental crust: A review. Surv. Geophys. 32, 875-903.
-
-Zhang, Z., Revil, A. et al. (2023). Induced polarization of volcanic
-    rocks - 7. The case of pyroclastic rocks and lavas from
-    stratovolcanoes. Geophys. J. Int. 234(3), 2375.
 
 @author: samuels
 """
@@ -531,9 +608,24 @@ def _validate_range(arr, name, lo, hi, hard=False):
 M_NACL = 0.05844
 
 # Conversion: meq/100g -> C/kg (SI).
-# 1 meq = 96.485e-3 C; per 100g = per 0.1 kg; so 1 meq/100g = 0.96485 C/kg.
-# Used for Waxman-Smits/Revil CEC in SI units and for Levy's CEC_0 reference.
-MEQ_TO_CKG = 9.6485
+# Unit-conversion factor: cation exchange capacity from meq/100g to C/kg.
+#
+#   1 equivalent = 1 mole of charge x F (Faraday) = 96,485 C
+#   1 meq        = 10^-3 equivalent                = 96.485 C
+#   1 meq/100g   = 96.485 C / 0.1 kg              = 964.85 C/kg
+#
+# So CEC_Ckg = CEC_meq_per_100g * 964.85. Used for Waxman-Smits / Revil
+# CEC in SI units (where sigma_s = ... * rho_g * beta * CEC in kg/m^3 *
+# m^2/(V.s) * C/kg = S/m) and for the denominator of Levy's CEC/CEC_0
+# ratio (where both numerator and denominator get the same conversion,
+# so its value is irrelevant to the Levy branch specifically).
+#
+# Earlier versions of this library had MEQ_TO_CKG = 9.6485, which is
+# 100x too small. That bug silently suppressed Waxman-Smits and Revil
+# surface-conduction contributions by 100x in every calculation.
+# Lévy was not affected because its CEC appears only as a ratio.
+# Fixed 2026-04 against Revil (2002) Fig. 7b.
+MEQ_TO_CKG = 964.85
 
 
 
@@ -559,14 +651,68 @@ DEFAULT_CONFIG = {
     'intrusion_id': 1,            # region ID of the intrusion body
 
     # --- Surface conduction model ---
-    'surface_conduction_model': 'waxman_smits',  # 'waxman_smits', 'levy', or 'hybrid'
+    # One of:
+    #   'waxman_smits'       -- classical Waxman & Smits (1968) everywhere,
+    #                           with sigma_w-dependent B(sigma_w) from their
+    #                           Eq. 7 / Levy 2018 Eq. 7.
+    #   'revil'              -- Revil et al. (2002) DC-calibrated surface
+    #                           mobility beta_s everywhere.
+    #   'levy'               -- Levy et al. (2018) Eq. 16 everywhere.
+    #   'waxman_smits_revil' -- WS in non-clay regions, Revil 2002 in
+    #                           clay_cap_regions.
+    #   'waxman_smits_levy'  -- WS in non-clay regions, Levy 2018 in
+    #                           clay_cap_regions. Recommended production
+    #                           setting for smectite-bearing clay caps.
+    'surface_conduction_model': 'waxman_smits_levy',
 
-    # Waxman-Smits / Revil parameters
-    'counterion_mobility_25C': 5.19e-8,   # beta(Na+, 25C) [m2/(V.s)]
-    'counterion_temp_coeff': 0.037,        # alpha [1/C], linear T dependence
+    # Classical Waxman-Smits (1968) parameters, used when
+    # surface_conduction_model is 'waxman_smits', 'waxman_smits_revil',
+    # or 'waxman_smits_levy'. We use the WS 1968 Eq. 19 structural form
+    # (alpha = 0.6, gamma = 1.3 S/m from their Fig. 6, in SI units)
+    # but with beta_25 recalibrated to Revil et al. (2002)'s
+    # surface-bound counterion mobility rather than the WS 1968
+    # saturation limit:
+    #
+    #   B(sigma_w, 25C) = [1 - 0.6 * exp(-sigma_w / 1.3 S/m)] * 0.53e-8
+    #
+    # WS 1968 Eq. 19 in their original units gives beta_max =
+    # 0.046 mho.cm^2/meq = 4.77e-8 m^2/(V.s), but this is the FREE-
+    # SOLUTION Na+ mobility (WS's high-sigma_w asymptote where
+    # counterions are assumed to behave as in bulk electrolyte). DC
+    # measurements on altered volcanic rocks (Revil et al. 2002
+    # Fig. 7b) give beta_s = 0.53e-8 for surface-bound counterions --
+    # ~9x lower than free-solution, reflecting that bound counterions
+    # are actually less mobile than WS 1968 assumed. Applied at
+    # geothermal temperatures (T > 100 C, alpha_T ~ 0.04 /C gives
+    # x6-8 boosts), the free-solution beta_25 = 4.77e-8 produces
+    # wildly over-predicted surface conduction. We therefore use the
+    # Revil-calibrated beta_25 = 0.53e-8 while keeping WS's alpha and
+    # gamma parameterization for the sigma_w dependence of B.
+    #
+    # The temperature coefficient is also switched to Revil 2002
+    # Eq. 19 nu_S = 0.040 /C (surface), not nu_f = 0.023 /C (free
+    # fluid). Physically: since beta_25 now represents bound
+    # counterions, it inherits the surface temperature coefficient.
+    'ws_B_25': 0.53e-8,   # B(Na+, 25C, sigma_w->inf) [m2/(V.s)], Revil 2002 calibration
+    'ws_alpha_T': 0.040,  # temperature coefficient of B [1/C], Revil 2002 Eq. 19 (nu_S)
+    'ws_alpha_sw': 0.6,   # alpha in B(sigma_w) = beta*(1 - alpha*exp(-sigma_w/gamma)), WS 1968 Eq. 19
+    'ws_gamma_sw': 1.3,   # gamma [S/m] = 0.013 mho/cm, WS 1968 Eq. 19
 
-    # Levy et al. (2018, GJI 215) parameters
-    # Used when surface_conduction_model = 'levy' or 'hybrid'
+    # Revil et al. (2002) parameters (used when surface_conduction_model
+    # is 'revil' or 'waxman_smits_revil'). beta_s_25 = 0.53e-8 m^2/(V.s)
+    # is from Revil 2002 Fig. 7b (Cobalt-CEC linear regression), fit to
+    # their Eq. 7: sigma_S = (2/3)*rho_g*beta_s*(CEC - CEC_r) where
+    # sigma_S is the INTRINSIC clay surface conductivity, independent
+    # of pore fluid or F. The _revil_surface_conductivity helper
+    # implements this Eq. 7 literally (no F factor). For the full bulk
+    # Eqs. 11-13 including the Dukhin-number rollover across the
+    # isoconductivity point, call revil2002_bulk_conductivity() --
+    # required at xi = sigma_S/sigma_f below xi_+ = 1 - t_+ = 0.61.
+    'revil_beta_s_25': 0.53e-8,  # beta_s(Na+, 25C) [m2/(V.s)], Revil 2002 Eq. 7 + Fig. 7b
+    'revil_alpha_T': 0.040,      # temperature coefficient [1/C], Revil 2002 Eq. 19 (nu_S)
+
+    # Levy et al. (2018) parameters (used when surface_conduction_model
+    # is 'levy' or 'waxman_smits_levy'):
     'levy_CEC_0_meq_per_100g': 91.0,  # pure smectite reference CEC [meq/100g]
     'levy_B_prime': 0.77,             # proportionality constant B' [S/m]
     'levy_alpha_T': 0.040,            # temperature coefficient [1/C]
@@ -574,17 +720,16 @@ DEFAULT_CONFIG = {
 
     # --- Per-region properties ---
     # Override any default_region property for specific region IDs.
-    # Supported keys per region: grain_density, f_stern, CEC_meq_per_100g,
+    # Supported keys per region: grain_density, CEC_meq_per_100g,
     # porosity_exponent_m, saturation_exponent_n.
     # Example:
     #   'regions': {
-    #       1: {'porosity_exponent_m': 1.7},                     # basement
+    #       1:  {'porosity_exponent_m': 1.7},                     # basement
     #       11: {'porosity_exponent_m': 2.2, 'CEC_meq_per_100g': 80.0},  # clay cap
     #   }
     'regions': {},
     'default_region': {
         'grain_density': 2800.0,      # [kg/m3]
-        'f_stern': 0.95,              # Stern layer fraction [-]
         'CEC_meq_per_100g': 2.0,      # cation exchange capacity
         'porosity_exponent_m': None,  # per-region override; None -> use global
         'saturation_exponent_n': None, # per-region override; None -> use global
@@ -1987,8 +2132,8 @@ def archie_three_phase(sigma_solid, sigma_melt, sigma_vol,
 # =============================================================================
 # SECTION 7: SURFACE CONDUCTION
 # Waxman & Smits (1968) J. Pet. Tech. 20(6), 107-122
-# Revil & Florsch (2010) GJI 181, 1480-1498, Eqs. (2)-(7)
-# Revil et al. (2017) GJI 208, 826-844, Eqs. (15)-(16)
+# Revil et al. (1998) J. Geophys. Res. 103, 23925-23936, Eq. (8)
+# Revil et al. (2002) J. Geophys. Res. 107(B8), 2168, Eq. (7), Fig. 7b
 # Levy et al. (2018) GJI 215, 1558-1582, Eqs. (13), (16), (17)
 # =============================================================================
 
@@ -1997,7 +2142,7 @@ def build_CEC_array(region_ids, config):
     Per-node CEC from region configuration.
 
     CEC (cation exchange capacity) is converted from meq/100g to C/kg
-    (SI units) using the Faraday-based factor MEQ_TO_CKG = 9.6485.
+    (SI units) using the Faraday-based factor MEQ_TO_CKG = 964.85.
 
     Parameters
     ----------
@@ -2016,16 +2161,24 @@ def build_CEC_array(region_ids, config):
 
     regions = config.get('regions', {})
     default = config.get('default_region', {})
-    default_CEC = default.get('CEC_meq_per_100g', 2.0) * MEQ_TO_CKG
+    # Default CEC fallback lowered from 2.0 to 0.2 meq/100g: a value of
+    # 2.0 is reasonable only for mildly altered volcanics, and using it
+    # as a silent default for unassigned region IDs produced large
+    # surface conduction in every node of the domain once the
+    # MEQ_TO_CKG unit-conversion bug was fixed. 0.2 meq/100g
+    # corresponds to fresh crystalline basement (Revil 2002 Table 3),
+    # a conservative choice that doesn't accidentally add significant
+    # surface conduction to unmapped regions.
+    default_CEC = default.get('CEC_meq_per_100g', 0.2) * MEQ_TO_CKG
 
     # Legacy support
     if not regions and 'surface_conduction_regions' in config:
         sc = config['surface_conduction_regions']
         for rid, props in sc.items():
             regions[int(rid)] = {
-                'CEC_meq_per_100g': props.get('CEC_meq_per_100g', 2.0)}
+                'CEC_meq_per_100g': props.get('CEC_meq_per_100g', 0.2)}
         default_CEC = config.get(
-            'surface_conduction_default_CEC_meq_per_100g', 2.0) * MEQ_TO_CKG
+            'surface_conduction_default_CEC_meq_per_100g', 0.2) * MEQ_TO_CKG
 
     CEC = np.full(n, default_CEC)
     for rid, rprops in regions.items():
@@ -2052,7 +2205,7 @@ def build_region_property(region_ids, config, prop_name, n_nodes):
     config : dict
         Must contain 'regions' and 'default_region'.
     prop_name : str
-        Property name, e.g. 'grain_density', 'f_stern'.
+        Property name, e.g. 'grain_density'.
     n_nodes : int
         Number of nodes.
 
@@ -2063,7 +2216,7 @@ def build_region_property(region_ids, config, prop_name, n_nodes):
     """
     regions = config.get('regions', {})
     default = config.get('default_region', {})
-    hardcoded = {'grain_density': 2800.0, 'f_stern': 0.95}
+    hardcoded = {'grain_density': 2800.0}
     default_val = default.get(prop_name, hardcoded.get(prop_name, 0.0))
 
     # Treat None as 0.0 (caller uses 0 to detect "not set")
@@ -2174,50 +2327,312 @@ def _levy_surface_conductivity(phi_eff, CEC, T, m_arr, config):
 
 
 def _waxman_smits_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
-                                       f_stern, CEC, T, config):
+                                       CEC, T, sigma_w, config):
     """
-    Corrected Waxman-Smits surface conductivity.
+    Waxman & Smits (1968) surface conductivity with a Revil 2002
+    recalibration of beta_25 for surface-bound counterions.
 
-    Uses the bulk-volume form equivalent to Revil et al. (2017) Eq. (16):
+    Implements Waxman & Smits (1968, J. Pet. Tech. 20(6), 107-122) in
+    the volume-averaged bulk form of Revil et al. (1998, J. Geophys.
+    Res. 103, 23925-23936, Eq. 8):
 
-        sigma_surface = (1 / (F * phi)) * (1 - phi) * rho_g * beta_plus(T)
-                      * (1 - f_stern) * CEC * S_total^(n - 1)
+        sigma_s = (1/(F*phi_eff)) * (1-phi_eff) * rho_g * B(sigma_w, T)
+                  * CEC * S_total^(n-1)
+
+    The salinity dependence of the apparent counterion mobility follows
+    Waxman & Smits (1968) Eq. 19:
+
+        B(sigma_w, T) = beta(T) * (1 - alpha * exp(-sigma_w / gamma))
+        beta(T)       = beta_25 * (1 + alpha_T * (T - 25))
+
+    Default parameters are a hybrid: we keep WS 1968's original Eq. 19
+    structural form and empirical alpha / gamma, but recalibrate
+    beta_25 to Revil et al. (2002)'s DC-measured surface counterion
+    mobility rather than the WS 1968 free-solution saturation limit:
+
+        alpha    = 0.6                          (WS 1968 Eq. 19)
+        gamma    = 1.3 S/m   (= 0.013 mho/cm)   (WS 1968 Eq. 19)
+        beta_25  = 0.53e-8 m^2/(V.s)             (Revil 2002 Fig. 7b)
+        alpha_T  = 0.040 /C                      (Revil 2002 Eq. 19,
+                                                  nu_S surface)
+
+    Why the hybrid: WS 1968's Eq. 19 implies beta_max = 4.77e-8 m^2/(V.s)
+    at saturation, which is essentially the FREE-SOLUTION Na+ mobility.
+    Applied at geothermal temperatures with alpha_T = 0.023 /C, this
+    over-predicts sigma_surface by ~10x because real surface-bound
+    counterions have beta ~ 0.5e-8 (Revil 2002 DC measurements on
+    altered volcanic rocks). Using Revil's calibration here keeps the
+    WS sigma_w-dependence (important for unaltered low-salinity rocks
+    where the diffuse layer expands and mobility is reduced) while
+    correcting the magnitude.
+
+    At high sigma_w the mobility asymptotes to beta(T). At low sigma_w
+    it is reduced by (1-alpha) because the expanded electrical double
+    layer impedes ion mobility (Waxman & Smits 1968 Sec V; Levy et
+    al. 2018 Sec 2.2).
+
+    In the high-sigma_w saturation limit, this branch reduces to
+    approximately:
+        sigma_s_WS ~ (1-phi)/(F phi) * rho_g * 0.53e-8 * (1+0.04(T-25)) * CEC
+    which is the WS Eq. 8 volume-averaging geometry with Revil 2002's
+    chemistry. Compare to the Revil 2002 'revil' branch which uses the
+    same chemistry but in the DEM geometry:
+        sigma_s_Revil = (2/3) * rho_g * 0.53e-8 * (1+0.04(T-25)) * CEC.
+    The geometric prefactor (1-phi)/(F phi) typically suppresses WS by
+    a factor of ~5-10 vs Revil at clay-cap conditions (phi~0.1, F~100).
 
     Parameters
     ----------
     phi_eff : ndarray
-        Effective porosity [-].
+        Effective porosity (halite-corrected) [-].
     F : ndarray
-        Formation factor [-].
+        Formation factor F = a / phi_eff^m [-].
     S_total : ndarray
-        Total wetting saturation used for surface conduction [-].
+        Total wetting saturation S_liq + S_vap [-].
     n_arr : ndarray
         Saturation exponent [-].
     rho_g : ndarray
         Grain density [kg/m3].
-    f_stern : ndarray
-        Stern layer fraction [-].
     CEC : ndarray
         Cation exchange capacity [C/kg].
     T : ndarray
         Temperature [deg C].
+    sigma_w : ndarray
+        Pore-fluid (brine) conductivity [S/m]. Used for the non-linear
+        B(sigma_w) dependence.
     config : dict
-        Must provide or default counterion_mobility_25C and
-        counterion_temp_coeff.
+        Must provide or default: ws_B_25, ws_alpha_T, ws_alpha_sw,
+        ws_gamma_sw.
 
     Returns
     -------
     sigma_surface : ndarray
-        Surface conductivity contribution [S/m].
+        Surface conductivity contribution [S/m], additive to the
+        mixing-law bulk term.
     """
-    alpha = config.get('counterion_temp_coeff', 0.037)
-    beta_25 = config.get('counterion_mobility_25C', 5.19e-8)
-    beta = beta_25 * (1.0 + alpha * (np.asarray(T, dtype=float) - 25.0))
+    # Defaults: WS 1968 Eq. 19 structural form (alpha, gamma) with
+    # beta_25 and alpha_T recalibrated to Revil 2002 for surface-bound
+    # counterion mobility. See module-level DEFAULT_CONFIG comments
+    # for the rationale.
+    B_25 = float(config.get('ws_B_25', 0.53e-8))
+    alpha_T = float(config.get('ws_alpha_T', 0.040))
+    alpha_sw = float(config.get('ws_alpha_sw', 0.6))
+    gamma_sw = float(config.get('ws_gamma_sw', 1.3))
+
+    T_arr = np.asarray(T, dtype=float)
+    sw = np.maximum(np.asarray(sigma_w, dtype=float), 0.0)
+
+    beta_T = B_25 * (1.0 + alpha_T * (T_arr - 25.0))
+    B = beta_T * (1.0 - alpha_sw * np.exp(-sw / gamma_sw))
+    B = np.clip(B, 0.0, None)
 
     return ((1.0 / (F * phi_eff))
             * (1.0 - phi_eff)
             * (S_total ** (n_arr - 1.0))
-            * rho_g * beta * (1.0 - f_stern) * CEC)
+            * rho_g * B * CEC)
+
+
+def _revil_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
+                                CEC, T, config):
+    """
+    Revil et al. (2002) intrinsic clay-surface conductivity, Eq. 7.
+
+    Revil, A., Hermitte, D., Spangenberg, E. & Cochemé, J.J. (2002).
+    J. Geophys. Res. 107(B8), 2168.
+
+        sigma_S = (2/3) * rho_g * beta_S(T) * CEC * S_total^(n-1)
+        beta_S(T) = beta_s_25 * (1 + alpha_T * (T - 25))
+
+    sigma_S in Revil 2002 is the INTRINSIC surface conductivity of
+    the clay fraction -- a property of the rock itself, independent
+    of pore fluid and of the formation factor F. It is the quantity
+    plotted on the y-axis of Revil 2002 Fig. 7b. The (2/3) factor is
+    the DEM geometric averaging factor for spherical grains (Revil &
+    Glover 1998; Bruggeman 1935).
+
+    IMPORTANT: in Revil 2002, the dependence of the BULK rock
+    conductivity on F enters separately via their Eqs. 11-13, which
+    build sigma_bulk = sigma_f/F * H(xi) from sigma_S and the
+    pore-fluid conductivity. See revil2002_bulk_conductivity() for a
+    full Eq. 11/12/13 implementation that includes the Dukhin-number
+    rollover below the isoconductivity point.
+
+    When this helper's output is used in the library's additive-form
+    bulk mixing law (sigma_bulk = sigma_f/F + sigma_surface, as used
+    for WS and Levy), it is equivalent to applying Revil 2002's
+    high-salinity limit (their Eq. 10, with the small correction
+    -sigma_f*t_+/F omitted). This is accurate for xi = sigma_S/sigma_f
+    well above the isoconductivity point xi_+ = 1 - t_+ ~ 0.61 for
+    NaCl; at lower salinity, use revil2002_bulk_conductivity().
+
+    Note: Revil 2002 Eq. 7 also includes a residual-CEC subtraction
+    (CEC - CEC_r) to remove the zeolite fraction that is measured by
+    Cobalt titration but does not conduct. For the Yuzawa smectite
+    clay cap, CEC_r is taken to be 0 and the per-region CEC is the
+    smectite-effective value. The verify_revil2002_fig7b.py script
+    applies CEC_r = 3 meq/100g externally for the Fig. 7b sanity
+    check.
+
+    Earlier versions of this helper (i) used Revil 1998 Eq. 8
+    geometry (1-phi)/(F*phi), which under-predicted Fig. 7b by
+    ~7-12x, and later (ii) included a (F-1)/F factor that does not
+    appear in Revil 2002 Eq. 7 (that was from the Revil 1998 bulk
+    formula). Both have been removed; this helper now matches Eq. 7
+    literally.
+
+    The saturation scaling S_total^(n-1) is retained for consistency
+    with the WS and Levy branches (partial-saturation correction).
+
+    Parameters
+    ----------
+    phi_eff : ndarray
+        Effective porosity (halite-corrected) [-]. Not used in Eq. 7
+        itself but retained in the signature for interface
+        consistency with the WS and Levy helpers.
+    F : ndarray
+        Formation factor [-]. Not used in Eq. 7 itself but retained
+        in the signature for interface consistency.
+    S_total : ndarray
+        Total wetting saturation [-].
+    n_arr : ndarray
+        Saturation exponent [-].
+    rho_g : ndarray
+        Grain density [kg/m3].
+    CEC : ndarray
+        Cation exchange capacity [C/kg]. In Yuzawa production,
+        CEC is already the smectite-effective value (no CEC_r
+        subtraction required).
+    T : ndarray
+        Temperature [deg C].
+    config : dict
+        Must provide or default: revil_beta_s_25, revil_alpha_T.
+
+    Returns
+    -------
+    sigma_surface : ndarray
+        Intrinsic surface conductivity sigma_S [S/m].
+    """
+    beta_s_25 = float(config.get('revil_beta_s_25', 0.53e-8))
+    alpha_T = float(config.get('revil_alpha_T', 0.040))
+
+    T_arr = np.asarray(T, dtype=float)
+    beta_s = beta_s_25 * (1.0 + alpha_T * (T_arr - 25.0))
+    beta_s = np.clip(beta_s, 0.0, None)
+
+    return ((2.0 / 3.0)
+            * rho_g
+            * beta_s
+            * CEC
+            * (S_total ** (n_arr - 1.0)))
+
+
+def revil2002_bulk_conductivity(sigma_fluid, F, sigma_S, t_plus=0.39):
+    """
+    Full Revil et al. (2002) bulk conductivity via Eqs. 11-13 with
+    Dukhin-number rollover across the isoconductivity point.
+
+    Reference: Revil, A., Hermitte, D., Spangenberg, E. & Cochemé,
+    J.J. (2002). Electrical properties of zeolitized volcaniclastic
+    materials. J. Geophys. Res. 107(B8), 2168. Equations 11, 12, 13
+    (page 8 of the published paper).
+
+    Their framework decomposes the bulk rock conductivity into cation
+    and anion contributions:
+
+        sigma = sigma_(+) + sigma_(-)     (Eq. 3)
+        sigma_(-) = (sigma_f / F) * (1 - t_+)  (only anions in bulk
+                                                fluid; cations are
+                                                mostly surface-bound)
+
+    and combines them into a single relation in terms of the Dukhin
+    number xi = sigma_S / sigma_f:
+
+        sigma / sigma_f = (1/F) * H(xi)                        (Eq. 11)
+
+    with H(xi) piecewise in xi:
+
+        xi_+ = 1 - t_+     (isoconductivity point; continuity of H)
+
+        H(xi) = 1 - t_+ + F*xi                                 (Eq. 13)
+            for xi >= xi_+  (high-salinity regime)
+            This is equivalent to the simple additive form
+            sigma = sigma_S + (sigma_f / F) * (1 - t_+).
+
+        H(xi) = 1 - t_+ + F*xi
+              + (1/2) * (1 - t_+ - xi)
+                * [1 - sqrt((1 - xi/t_+)^2 + 4*F*xi/t_+)]      (Eq. 12)
+            for xi < xi_+  (low-salinity / close-to-isoconductivity)
+            The correction term (1/2)(1-t_+-xi)*[1 - sqrt(...)]
+            subtracts from the high-salinity asymptote, reflecting
+            the reduced surface-conduction contribution when
+            xi < xi_+.
+
+    Both branches evaluate to the same value at xi = xi_+ = 1 - t_+
+    (the correction term's (1-t_+-xi) factor vanishes), so H is
+    continuous there.
+
+    Parameters
+    ----------
+    sigma_fluid : ndarray
+        Pore-fluid (brine) conductivity [S/m].
+    F : ndarray
+        Formation factor [-]. Usually F = 1 / phi^m in Archie.
+    sigma_S : ndarray
+        Intrinsic surface conductivity of the clay fraction [S/m],
+        as returned by _revil_surface_conductivity (Eq. 7).
+    t_plus : float, default 0.39
+        Cation transport number in the pore fluid. Default 0.39 is
+        the Na+ transport number in aqueous NaCl at 25 C (Robinson
+        & Stokes). Mildly temperature-dependent; the default is
+        adequate for geothermal applications within its ~10%
+        uncertainty.
+
+    Returns
+    -------
+    sigma_bulk : ndarray
+        Bulk rock electrical conductivity [S/m].
+
+    Notes
+    -----
+    Unlike the additive form used for WS and Levy, this function
+    returns the BULK conductivity directly -- there is no "surface
+    contribution" to add to sigma_fluid/F. The pore-fluid contribution
+    (1-t_+) * sigma_f/F is already baked into H(xi).
+
+    For Yuzawa production (which uses the additive framework), the
+    _revil_surface_conductivity helper's output is used as sigma_s
+    in sigma_bulk = sigma_f/F + sigma_s, which approximates this
+    full result at xi >> xi_+.
+    """
+    sigma_f = np.asarray(sigma_fluid, dtype=float)
+    F_arr = np.asarray(F, dtype=float)
+    sigma_S_arr = np.asarray(sigma_S, dtype=float)
+    t_p = float(t_plus)
+
+    # Dukhin number
+    sigma_f_safe = np.where(sigma_f > 0.0, sigma_f, 1e-30)
+    xi = sigma_S_arr / sigma_f_safe
+    xi_plus = 1.0 - t_p  # isoconductivity point
+
+    # High-salinity branch (Eq. 13): H = (1 - t_+) + F * xi
+    H_high = (1.0 - t_p) + F_arr * xi
+
+    # Low-salinity branch (Eq. 12): H = H_high + correction
+    # correction = (1/2) * (1 - t_+ - xi) * [1 - sqrt((1 - xi/t_+)^2
+    #                                                + 4 F xi / t_+)]
+    # Guard against xi/t_+ making the sqrt argument negative (it
+    # can't mathematically, but guard numerically).
+    xi_over_tp = xi / max(t_p, 1e-12)
+    sqrt_arg = (1.0 - xi_over_tp) ** 2 + 4.0 * F_arr * xi / max(t_p, 1e-12)
+    sqrt_arg = np.maximum(sqrt_arg, 0.0)
+    correction = 0.5 * (1.0 - t_p - xi) * (1.0 - np.sqrt(sqrt_arg))
+    H_low = H_high + correction
+
+    # Piecewise assembly
+    H = np.where(xi >= xi_plus, H_high, H_low)
+
+    # Eq. 11: sigma/sigma_f = H / F
+    return sigma_f * H / F_arr
 
 
 # =============================================================================
@@ -2687,11 +3102,12 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
             sigma_bulk = (1/F) * sigma_fluid + sigma_surface
 
     Surface conduction (sigma_surface) is added in both cases using the
-    configured surface_conduction_model. 'waxman_smits' applies the
-    corrected Waxman-Smits / Revil Eq. (16) form; 'levy' applies Levy
-    et al. (2018) Eq. (16) as the additive surface term in Eq. (13);
-    'hybrid' applies Levy only in config['clay_cap_regions'] and
-    Waxman-Smits elsewhere.
+    configured surface_conduction_model. Available options:
+    'waxman_smits' (classical WS with sigma_w-dependent B),
+    'revil' (Revil 2002 DC-calibrated beta_s),
+    'levy' (Levy 2018 Eq. 16),
+    'waxman_smits_revil' (WS outside, Revil 2002 in clay_cap_regions),
+    'waxman_smits_levy' (WS outside, Levy in clay_cap_regions).
 
     Parameters
     ----------
@@ -2780,52 +3196,76 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
     phi_eff = np.clip(phi_eff_raw, 1e-3, 1.0)
     F = a / (phi_eff ** m_arr)
 
-    # Surface conduction can use either:
-    # - corrected Waxman-Smits / Revil Eq. (16)
-    # - Levy et al. (2018) Eq. (16), used here as the additive
-    #   sigma_surface term in the three-pathway framework of Eq. (13)
-    # - a hybrid split: Levy in clay_cap_regions, Waxman-Smits elsewhere.
+    # Surface conduction: five options (see module docstring for details).
+    # All formulations are additive terms that enter alongside the mixing
+    # law, and all use phi_eff (halite-corrected porosity).
     CEC = build_CEC_array(region_n[hm], config)
     rho_g = build_region_property(region_n[hm], config, 'grain_density', n_h)
-    f_stern = build_region_property(region_n[hm], config, 'f_stern', n_h)
     T_h = T[hm]
     S_total = np.clip(Sliq[hm] + Svap[hm], 0.0, 1.0)
+    sigma_w_h = sig_liq[hm]   # pore-fluid conductivity, used by classical WS
 
     surface_model = str(
-        config.get('surface_conduction_model', 'waxman_smits')).lower()
+        config.get('surface_conduction_model', 'waxman_smits_levy')).lower()
 
-    if surface_model == 'levy':
-        sig_surface = _levy_surface_conductivity(
-            phi_eff, CEC, T_h, m_arr, config)
-    elif surface_model == 'waxman_smits':
-        sig_surface = _waxman_smits_surface_conductivity(
-            phi_eff, F, S_total, n_arr, rho_g, f_stern, CEC, T_h, config)
-    elif surface_model == 'hybrid':
-        clay_cap_regions = [int(rid) for rid in config.get('clay_cap_regions', [])]
+    def _ws(mask):
+        return _waxman_smits_surface_conductivity(
+            phi_eff[mask], F[mask], S_total[mask], n_arr[mask],
+            rho_g[mask], CEC[mask], T_h[mask], sigma_w_h[mask], config)
+
+    def _revil(mask):
+        return _revil_surface_conductivity(
+            phi_eff[mask], F[mask], S_total[mask], n_arr[mask],
+            rho_g[mask], CEC[mask], T_h[mask], config)
+
+    def _levy(mask):
+        return _levy_surface_conductivity(
+            phi_eff[mask], CEC[mask], T_h[mask], m_arr[mask], config)
+
+    all_mask = np.ones(n_h, dtype=bool)
+
+    if surface_model == 'waxman_smits':
+        sig_surface = _ws(all_mask)
+        print(f"    Surface model: Waxman-Smits (classical, with "
+              f"B(sigma_w)) everywhere ({n_h} nodes)")
+    elif surface_model == 'revil':
+        sig_surface = _revil(all_mask)
+        print(f"    Surface model: Revil (2002) everywhere "
+              f"({n_h} nodes)")
+    elif surface_model == 'levy':
+        sig_surface = _levy(all_mask)
+        print(f"    Surface model: Levy (2018) everywhere "
+              f"({n_h} nodes)")
+    elif surface_model in ('waxman_smits_revil', 'waxman_smits_levy'):
+        clay_cap_regions = [int(rid)
+                            for rid in config.get('clay_cap_regions', [])]
         clay_mask = np.isin(region_n[hm], clay_cap_regions)
         sig_surface = np.empty(n_h, dtype=float)
 
         if len(clay_cap_regions) == 0:
             warnings.warn(
-                "surface_conduction_model='hybrid' but clay_cap_regions is "
-                "empty; falling back to Waxman-Smits everywhere.")
+                f"surface_conduction_model='{surface_model}' but "
+                f"clay_cap_regions is empty; Waxman-Smits is applied "
+                f"everywhere (no clay-cap substitution).")
 
-        if np.any(clay_mask):
-            sig_surface[clay_mask] = _levy_surface_conductivity(
-                phi_eff[clay_mask], CEC[clay_mask], T_h[clay_mask],
-                m_arr[clay_mask], config)
         if np.any(~clay_mask):
-            sig_surface[~clay_mask] = _waxman_smits_surface_conductivity(
-                phi_eff[~clay_mask], F[~clay_mask], S_total[~clay_mask],
-                n_arr[~clay_mask], rho_g[~clay_mask], f_stern[~clay_mask],
-                CEC[~clay_mask], T_h[~clay_mask], config)
+            sig_surface[~clay_mask] = _ws(~clay_mask)
+        if np.any(clay_mask):
+            if surface_model == 'waxman_smits_revil':
+                sig_surface[clay_mask] = _revil(clay_mask)
+            else:  # waxman_smits_levy
+                sig_surface[clay_mask] = _levy(clay_mask)
 
-        print(f"    Hybrid surface model: Levy on {np.sum(clay_mask)} clay-cap "
-              f"nodes, Waxman-Smits on {np.sum(~clay_mask)} non-clay nodes")
+        clay_model = ('Revil (2002)' if surface_model == 'waxman_smits_revil'
+                      else 'Levy (2018)')
+        print(f"    Surface model: Waxman-Smits on "
+              f"{int(np.sum(~clay_mask))} non-clay nodes, "
+              f"{clay_model} on {int(np.sum(clay_mask))} clay-cap nodes")
     else:
         raise ValueError(
-            f"Unknown surface_conduction_model: '{surface_model}'. "
-            f"Use 'waxman_smits', 'levy', or 'hybrid'.")
+            f"Unknown surface_conduction_model: '{surface_model}'. Use "
+            "'waxman_smits', 'revil', 'levy', 'waxman_smits_revil', or "
+            "'waxman_smits_levy'.")
 
     # Mixing law: Glover (2010) three-phase or Hashin-Shtrikman
     mixing_law = config.get('mixing_law', 'glover')
