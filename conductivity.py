@@ -149,10 +149,23 @@ configured surface_conduction_model (see Surface conduction section
 below). The recommended production setting for smectite-bearing clay
 caps is 'waxman_smits_levy'.
 
-The density-based model switch for the vapor phase (Watanabe above
-450 kg/m3, density model at 200-450 kg/m3, Sinmyo-Keppler below
-200 kg/m3) is applied within compute_fluid_conductivity before
-either mixing law.
+The density-based model switch for the vapor / supercritical-fluid
+phase (Watanabe 2021 above 450 kg/m3, Watanabe 2022 density model at
+200-450 kg/m3, Sinmyo & Keppler 2017 below 200 kg/m3) is applied
+within compute_fluid_conductivity before either mixing law. To
+eliminate the step discontinuities that would otherwise appear where
+(T,P,X) trajectories cross rho = 450 or rho = 200 -- the two models
+disagree by roughly 30-40% at rho = 450, and by more at rho = 200
+where both are extrapolating -- _sigma_fluid_by_density applies a
+linear-in-rho blend in narrow transition windows centred on each
+threshold. The default window half-widths are +/- 30 kg/m3 around
+rho = 450 (blend over 420-480) and +/- 20 kg/m3 around rho = 200
+(blend over 180-220). The half-widths are parameterised as
+blend_halfwidth_upper / blend_halfwidth_lower on
+_sigma_fluid_by_density; set both to 0 to recover the original
+hard-step routing. Outside the blend windows each model is used
+pure, so behaviour well inside each model's calibration envelope is
+unchanged.
 
 Per-region properties
 ---------------------
@@ -1176,61 +1189,134 @@ def sigma_vapor(wt_frac_NaCl, T_C, P_bar, density_solution):
 # SECTION 3: FLUID CONDUCTIVITY (two-phase L+V mixing at nodes)
 # =============================================================================
 
-def _sigma_fluid_by_density(wt_frac_NaCl, T_C, P_bar, rho):
+def _sigma_fluid_by_density(wt_frac_NaCl, T_C, P_bar, rho,
+                            blend_halfwidth_upper=30.0,
+                            blend_halfwidth_lower=20.0):
     """
-    Fluid conductivity routed by density.
+    Fluid conductivity routed by density, with LINEAR BLENDING across
+    the two model-switch densities to avoid discontinuities.
 
-    Routing:
-        rho >= 450 kg/m3 -> Watanabe (2021) viscosity-based model
-        200 <= rho < 450 -> density model (Watanabe 2022 Section 3.2.2)
-        rho < 200        -> Sinmyo & Keppler (2017) dilute-steam model
+    Routing (with linear-in-rho blend windows centred on the nominal
+    thresholds):
+        rho >= 450 + hu             -> pure Watanabe (2021) liquid-branch
+        450 - hu <= rho < 450 + hu  -> linear blend Watanabe21 <-> density-model
+        200 + hl <= rho < 450 - hu  -> pure density-model (Watanabe 2022)
+        200 - hl <= rho < 200 + hl  -> linear blend density-model <-> Sinmyo-Keppler
+        rho < 200 - hl              -> pure Sinmyo-Keppler (2017) dilute-steam
 
-    The 450 kg/m3 threshold is the lower bound of the density-model's
-    fit range (Watanabe 2022 fit the density model on Watanabe 2021
-    single-phase data at 450-700 kg/m3). Below 200 kg/m3 the density
-    model is extrapolating and Sinmyo-Keppler is calibrated for
-    dilute steam, so we switch there.
+    where hu = blend_halfwidth_upper (default 30 kg/m^3; blend over
+    420-480) and hl = blend_halfwidth_lower (default 20 kg/m^3; blend
+    over 180-220).
 
-    Applied identically to the liquid and vapor phases because CSMP++
-    may label supercritical fluid as either (what matters is density,
-    not the phase label).
+    Rationale: the nominal 450 threshold is the lower bound of the
+    density-model fit range (Watanabe 2022 fit it on Watanabe 2021
+    data at 450-700 kg/m^3), and at exactly rho = 450 the two models
+    disagree by roughly 40% (density-model high, Watanabe21 low; see
+    diag_driesner_f_patchiness.py). A hard threshold imprints that
+    mismatch as a visible step in sigma across any (T,P,X) path that
+    crosses rho = 450, which is visible as contour ribbons along the
+    450 kg/m^3 isopycnal in the F field above the V+L dome. The
+    density-model / Sinmyo-Keppler handoff at rho = 200 has the
+    density-model extrapolating below its fit range (200-450) on one
+    side and Sinmyo-Keppler on the other, with a comparable or larger
+    mismatch.
+
+    Blending linearly in rho preserves each model's behaviour well
+    inside its calibration envelope and just eases the transition.
+    The blend window widths (30 upper, 20 lower) are narrower than
+    either model's range (~250 kg/m^3 for the density model, 200 for
+    Sinmyo), so each is still the sole contributor over most of its
+    domain. Set blend_halfwidth_* = 0 to recover the previous
+    hard-step behaviour.
+
+    Applied identically to liquid and vapor branches because what
+    matters is density, not the phase label.
 
     Parameters
     ----------
     wt_frac_NaCl, T_C, P_bar, rho : array_like
         Per-node inputs, same length.
+    blend_halfwidth_upper : float, optional
+        Half-width of the linear blend window at rho = 450 kg/m^3.
+        Default 30 (blend over 420-480).
+    blend_halfwidth_lower : float, optional
+        Half-width of the linear blend window at rho = 200 kg/m^3.
+        Default 20 (blend over 180-220).
 
     Returns
     -------
     sigma : ndarray
         Fluid conductivity [S/m].
     counts : dict
-        {'watanabe': n_dense, 'density_model': n_intermediate,
-         'sinmyo': n_dilute} for diagnostic printout.
+        {'watanabe': n_pure_dense, 'density_model': n_pure_intermediate,
+         'sinmyo': n_pure_dilute, 'blend_upper': n_in_upper_blend,
+         'blend_lower': n_in_lower_blend} for diagnostic printout.
+        Cells in a blend window are counted in the blend entry only,
+        not in either pure-branch count.
     """
     wt_frac_NaCl = np.asarray(wt_frac_NaCl, dtype=float)
     T_C = np.asarray(T_C, dtype=float)
     P_bar = np.asarray(P_bar, dtype=float)
     rho = np.asarray(rho, dtype=float)
 
-    dense = rho >= 450.0
-    intermediate = (rho >= 200.0) & (rho < 450.0)
-    dilute = rho < 200.0
+    hu = float(blend_halfwidth_upper)
+    hl = float(blend_halfwidth_lower)
+
+    # Boundaries of the five regions
+    rho_up_hi = 450.0 + hu    # >= this -> pure Watanabe21
+    rho_up_lo = 450.0 - hu    # this .. rho_up_hi -> blend W21 <-> density-model
+    rho_lo_hi = 200.0 + hl    # this .. rho_up_lo -> pure density-model
+    rho_lo_lo = 200.0 - hl    # this .. rho_lo_hi -> blend density-model <-> SK
+
+    pure_dense = rho >= rho_up_hi
+    blend_upper = (rho >= rho_up_lo) & (rho < rho_up_hi)
+    pure_inter = (rho >= rho_lo_hi) & (rho < rho_up_lo)
+    blend_lower = (rho >= rho_lo_lo) & (rho < rho_lo_hi)
+    pure_dilute = rho < rho_lo_lo
 
     sigma = np.zeros_like(rho)
-    if np.any(dense):
-        sigma[dense] = sigma_liquid(
-            wt_frac_NaCl[dense], T_C[dense], P_bar[dense], rho[dense])
-    if np.any(intermediate):
-        sigma[intermediate] = sigma_density_model(
-            rho[intermediate], wt_frac_NaCl[intermediate])
-    if np.any(dilute):
-        sigma[dilute] = sigma_vapor(
-            wt_frac_NaCl[dilute], T_C[dilute], P_bar[dilute], rho[dilute])
 
-    counts = {'watanabe': int(np.sum(dense)),
-              'density_model': int(np.sum(intermediate)),
-              'sinmyo': int(np.sum(dilute))}
+    if np.any(pure_dense):
+        sigma[pure_dense] = sigma_liquid(
+            wt_frac_NaCl[pure_dense], T_C[pure_dense],
+            P_bar[pure_dense], rho[pure_dense])
+    if np.any(pure_inter):
+        sigma[pure_inter] = sigma_density_model(
+            rho[pure_inter], wt_frac_NaCl[pure_inter])
+    if np.any(pure_dilute):
+        sigma[pure_dilute] = sigma_vapor(
+            wt_frac_NaCl[pure_dilute], T_C[pure_dilute],
+            P_bar[pure_dilute], rho[pure_dilute])
+
+    # Upper blend: linear in rho between density-model (at rho_up_lo)
+    # and Watanabe21 (at rho_up_hi). frac = 0 at lower edge -> pure
+    # density-model; frac = 1 at upper edge -> pure Watanabe21.
+    if hu > 0 and np.any(blend_upper):
+        sig_W21 = sigma_liquid(
+            wt_frac_NaCl[blend_upper], T_C[blend_upper],
+            P_bar[blend_upper], rho[blend_upper])
+        sig_DM = sigma_density_model(
+            rho[blend_upper], wt_frac_NaCl[blend_upper])
+        frac = (rho[blend_upper] - rho_up_lo) / (rho_up_hi - rho_up_lo)
+        sigma[blend_upper] = (1.0 - frac) * sig_DM + frac * sig_W21
+
+    # Lower blend: linear between Sinmyo-Keppler (at rho_lo_lo) and
+    # density-model (at rho_lo_hi). frac = 0 at lower edge -> pure SK;
+    # frac = 1 at upper edge -> pure density-model.
+    if hl > 0 and np.any(blend_lower):
+        sig_SK = sigma_vapor(
+            wt_frac_NaCl[blend_lower], T_C[blend_lower],
+            P_bar[blend_lower], rho[blend_lower])
+        sig_DM = sigma_density_model(
+            rho[blend_lower], wt_frac_NaCl[blend_lower])
+        frac = (rho[blend_lower] - rho_lo_lo) / (rho_lo_hi - rho_lo_lo)
+        sigma[blend_lower] = (1.0 - frac) * sig_SK + frac * sig_DM
+
+    counts = {'watanabe': int(np.sum(pure_dense)),
+              'density_model': int(np.sum(pure_inter)),
+              'sinmyo': int(np.sum(pure_dilute)),
+              'blend_upper': int(np.sum(blend_upper)),
+              'blend_lower': int(np.sum(blend_lower))}
     return sigma, counts
 
 
@@ -3631,7 +3717,7 @@ def calculate_conductivity_nodal(config, nodal_data, element_data,
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("conductivity.py -- self-test suite")
+    print("conductivity_lib.py -- self-test suite")
     print("=" * 70)
 
     passed = 0
