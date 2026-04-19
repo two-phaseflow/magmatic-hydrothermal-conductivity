@@ -91,17 +91,25 @@ Hydrothermal domain (no melt):
                              (0.53e-8 m^2/(V.s), alpha_T = 0.040 /C).
                              Preserves WS's sigma_w dependence while
                              using realistic surface-bound mobility.
-        'revil'              Revil et al. (2002) DC-calibrated intrinsic
-                             surface conductivity sigma_S from their
-                             Eq. 7, (2/3)*rho_g*beta_s*CEC (reproduces
-                             their Fig. 7b). For the full bulk
-                             Bussian-DEM mixing with Dukhin-number
-                             rollover, using the Revil (2019) volcanic-
-                             rock calibration, see
-                             revil_bulk_conductivity().
+        'revil'              Revil et al. (2002, 2019) Bussian-form
+                             differential effective medium (DEM)
+                             mixing law, with the volcanic-rock
+                             mobility recalibration of Revil et al.
+                             (2019) (B_25 = 3.1e-9, lambda_25 =
+                             3.0e-10 m^2/(V.s); 205 cores from
+                             Kilauea / White Island / Krafla /
+                             Yellowstone). Returned by the surface-
+                             conduction dispatcher as an additive
+                             effective term sigma_surface =
+                             sigma_bulk_DEM(sigma_w, F, sigma_ss) -
+                             sigma_w/F, so it plugs in to the same
+                             sigma_bulk = sigma_w/F + sigma_surface
+                             mixing used by the WS and Lévy options
+                             while capturing the Dukhin-number rollover
+                             that linear additive forms miss.
         'levy'               Lévy et al. (2018, Eq. 16) empirical
                              smectite-inclusive parameterization.
-        'waxman_smits_revil' WS in non-clay regions, Revil 2002 in
+        'waxman_smits_revil' WS in non-clay regions, Revil 2019 DEM in
                              config['clay_cap_regions'].
         'waxman_smits_levy'  WS in non-clay regions, Lévy in
                              config['clay_cap_regions'].
@@ -356,42 +364,49 @@ options are available, selected via config['surface_conduction_model']:
       by ~10x at geothermal conditions. Revil 2002's 0.53e-8 is the
       measured value on altered volcanic rocks at comparable regimes.
 
-  'revil': Revil et al. (2002, J. Geophys. Res. 107, 2168) DC-calibrated
-      intrinsic surface conductivity from their Eq. 7:
+  'revil': Revil et al. (2002, J. Geophys. Res. 107, 2168; 2019,
+      J. Geophys. Res. Solid Earth 124, 4367-4390) Bussian-form
+      differential effective medium (DEM) mixing law, with the
+      volcanic-rock mobility recalibration of Revil et al. (2019).
+      Closed-form bulk conductivity (Revil 2019 Eq. 10):
 
-          sigma_s = (2/3) * rho_g * beta_s(T) * CEC * S_total^(n-1)
+          sigma = (sigma_w / F) * [ F*X + (1/2) * (1 - X)
+                * ((1 - X) + sqrt((1 - X)^2 + 4 F X)) ]
 
-          beta_s(T) = beta_s_25 * (1 + alpha_T * (T - 25))
+      with X = sigma_ss / sigma_w the Dukhin number and sigma_ss
+      the DC grain conductivity (Revil 2019 Eqs. 7, 8, 18):
 
-      The (2/3) factor is the DEM geometric factor for spherical
-      grains (Revil & Glover 1998; Bruggeman 1935). sigma_s here is
-      the INTRINSIC surface conductivity of the clay fraction, the
-      quantity plotted on the y-axis of Revil 2002 Fig. 7b; it is a
-      property of the rock itself, independent of pore fluid or of
-      F. No salinity dependence; beta_s is an empirical surface
-      mobility that absorbs the Stern/diffuse-layer partition into a
-      single constant.
+          sigma_ss = (B(T) - lambda(T)) * Q_V / F
+          Q_V      = rho_g * (1 - phi) / phi * CEC
+          B(T), lambda(T) Arrhenius with E_a = 16 kJ/mol
 
-      Default: beta_s_25(Na+) = 0.53e-8 m^2/(V.s) (Revil 2002
-      Fig. 7b, Cobalt-CEC linear fit); alpha_T = 0.040 /C (Revil
-      2002 Eq. 19, nu_S).
+      Fitted mobilities at 25 C, on 205 volcanic cores from Kilauea,
+      White Island, Krafla, Yellowstone, etc. (Revil 2019 Figs. 9-10):
 
-      When combined with the library's additive-form bulk mixing law
-      (sigma_bulk = sigma_f/F + sigma_surface, as used for WS and
-      Levy), this is equivalent to the high-salinity linear limit of
-      the Revil (2002, 2019) Bussian-DEM formulation. For faithful
-      treatment at clay-cap conditions where the Dukhin number X =
-      sigma_ss / sigma_w approaches unity, call revil_bulk_conductivity()
-      directly -- it implements the full Bussian-form DEM (Revil 2019
-      Eq. 10) with the volcanic-rock calibration of Revil et al. 2019
-      (B_25 = 3.1e-9, lambda_25 = 3.0e-10 m^2/(V*s), fit on 205 cores
-      from Kilauea, White Island, Krafla, Yellowstone, etc.), which
-      is specifically targeted at imaging geothermal clay caps.
+          B_Na(25 C)      = 3.1e-9  m^2/(V.s)   +/-0.3e-9
+          lambda_Na(25 C) = 3.0e-10 m^2/(V.s)   +/-0.7e-10
 
-      NOTE: earlier versions of this library used Revil 1998 Eq. 8
-      geometry (1-phi)/(F*phi) or the (F-1)/F prefactor from Revil
-      1998's bulk formula. Both were incorrect -- Revil 2002 Eq. 7
-      has no F factor at all in the intrinsic sigma_S.
+      The 2019 paper is specifically calibrated for clay-cap imaging
+      in geothermal fields and gives a lower, more MT-consistent
+      surface contribution than the earlier Revil 2002 zeolitized-
+      tuff fit (which over-predicted clay-cap conductivity in this
+      application). The anion contribution is absorbed into the
+      (B - lambda) combination -- no separate t_+ transport number.
+
+      The dispatcher (_revil_surface_conductivity) wraps the full
+      DEM bulk conductivity into an additive effective surface term
+      sigma_surface = revil_bulk_conductivity(sigma_w, F, sigma_ss)
+                    - sigma_w / F
+      so that it plugs in to the standard sigma_bulk = sigma_w/F +
+      sigma_surface assembly used by the WS and Lévy options. Unlike
+      those linear additive forms, the result captures the Dukhin-
+      number rollover near the isoconductivity point sigma_w ~
+      sigma_ss where surface and fluid conductivities are comparable.
+
+      The underlying revil_bulk_conductivity and
+      revil_grain_conductivity helpers are also exposed as module-
+      level functions for sensitivity analyses that need the full
+      DEM bulk directly.
 
   'levy': Levy et al. (2018, GJI 215, 1558-1582) three-pathway
       framework (their Eqs. 13 and 16), capturing both edge-EDL and
@@ -725,18 +740,16 @@ DEFAULT_CONFIG = {
     'ws_alpha_sw': 0.6,   # alpha in B(sigma_w) = beta*(1 - alpha*exp(-sigma_w/gamma)), WS 1968 Eq. 19
     'ws_gamma_sw': 1.3,   # gamma [S/m] = 0.013 mho/cm, WS 1968 Eq. 19
 
-    # Revil et al. (2002) parameters (used when surface_conduction_model
-    # is 'revil' or 'waxman_smits_revil'). beta_s_25 = 0.53e-8 m^2/(V.s)
-    # is from Revil 2002 Fig. 7b (Cobalt-CEC linear regression), fit to
-    # their Eq. 7: sigma_S = (2/3)*rho_g*beta_s*(CEC - CEC_r) where
-    # sigma_S is the INTRINSIC clay surface conductivity, independent
-    # of pore fluid or F. The _revil_surface_conductivity helper
-    # implements this Eq. 7 literally (no F factor). For the full bulk
-    # Bussian-DEM mixing with Dukhin-number rollover, using the Revil
-    # (2019) volcanic-rock recalibration (n = 205 cores), call
-    # revil_bulk_conductivity() directly.
-    'revil_beta_s_25': 0.53e-8,  # beta_s(Na+, 25C) [m2/(V.s)], Revil 2002 Eq. 7 + Fig. 7b
-    'revil_alpha_T': 0.040,      # temperature coefficient [1/C], Revil 2002 Eq. 19 (nu_S)
+    # Revil et al. (2019) Bussian-DEM parameters (used when
+    # surface_conduction_model is 'revil' or 'waxman_smits_revil').
+    # These are hard-coded as module constants REVIL2019_B_NA_25,
+    # REVIL2019_LAMBDA_NA_25, and REVIL2019_EA_JMOL at the top of the
+    # file since they are fit on a global volcanic-rock dataset
+    # (n = 205 cores) and are not rock-specific tuning knobs. The
+    # previous Revil 2002 Eq. 7 parameters (revil_beta_s_25 =
+    # 0.53e-8, revil_alpha_T = 0.040) were removed when the 'revil'
+    # surface-conduction option was migrated to the Bussian DEM
+    # (revil_bulk_conductivity); the DEM does not use them.
 
     # Levy et al. (2018) parameters (used when surface_conduction_model
     # is 'levy' or 'waxman_smits_levy'):
@@ -2532,99 +2545,6 @@ def _waxman_smits_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
             * rho_g * B * CEC)
 
 
-def _revil_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
-                                CEC, T, config):
-    """
-    Revil et al. (2002) intrinsic clay-surface conductivity, Eq. 7.
-
-    Revil, A., Hermitte, D., Spangenberg, E. & Cochemé, J.J. (2002).
-    J. Geophys. Res. 107(B8), 2168.
-
-        sigma_S = (2/3) * rho_g * beta_S(T) * CEC * S_total^(n-1)
-        beta_S(T) = beta_s_25 * (1 + alpha_T * (T - 25))
-
-    sigma_S in Revil 2002 is the INTRINSIC surface conductivity of
-    the clay fraction -- a property of the rock itself, independent
-    of pore fluid and of the formation factor F. It is the quantity
-    plotted on the y-axis of Revil 2002 Fig. 7b. The (2/3) factor is
-    the DEM geometric averaging factor for spherical grains (Revil &
-    Glover 1998; Bruggeman 1935).
-
-    IMPORTANT: in Revil 2002 / 2019, the dependence of the BULK rock
-    conductivity on F enters separately via the Bussian-form DEM,
-    which builds sigma_bulk from a grain conductivity sigma_ss and the
-    pore-fluid conductivity sigma_w. See revil_bulk_conductivity() for
-    the full Revil 2019 Eq. 10 closed-form DEM with the updated
-    volcanic-rock mobility calibration.
-
-    When this helper's output is used in the library's additive-form
-    bulk mixing law (sigma_bulk = sigma_f/F + sigma_surface, as used
-    for WS and Levy), it is equivalent to the high-salinity linear
-    limit of the Bussian DEM. This is accurate well above the
-    isoconductivity point sigma_w ~ sigma_ss; at lower salinity, call
-    revil_bulk_conductivity() directly.
-
-    Note: Revil 2002 Eq. 7 also includes a residual-CEC subtraction
-    (CEC - CEC_r) to remove the zeolite fraction that is measured by
-    Cobalt titration but does not conduct. For the Yuzawa smectite
-    clay cap, CEC_r is taken to be 0 and the per-region CEC is the
-    smectite-effective value. The verify_revil2002_fig7b.py script
-    applies CEC_r = 3 meq/100g externally for the Fig. 7b sanity
-    check.
-
-    Earlier versions of this helper (i) used Revil 1998 Eq. 8
-    geometry (1-phi)/(F*phi), which under-predicted Fig. 7b by
-    ~7-12x, and later (ii) included a (F-1)/F factor that does not
-    appear in Revil 2002 Eq. 7 (that was from the Revil 1998 bulk
-    formula). Both have been removed; this helper now matches Eq. 7
-    literally.
-
-    The saturation scaling S_total^(n-1) is retained for consistency
-    with the WS and Levy branches (partial-saturation correction).
-
-    Parameters
-    ----------
-    phi_eff : ndarray
-        Effective porosity (halite-corrected) [-]. Not used in Eq. 7
-        itself but retained in the signature for interface
-        consistency with the WS and Levy helpers.
-    F : ndarray
-        Formation factor [-]. Not used in Eq. 7 itself but retained
-        in the signature for interface consistency.
-    S_total : ndarray
-        Total wetting saturation [-].
-    n_arr : ndarray
-        Saturation exponent [-].
-    rho_g : ndarray
-        Grain density [kg/m3].
-    CEC : ndarray
-        Cation exchange capacity [C/kg]. In Yuzawa production,
-        CEC is already the smectite-effective value (no CEC_r
-        subtraction required).
-    T : ndarray
-        Temperature [deg C].
-    config : dict
-        Must provide or default: revil_beta_s_25, revil_alpha_T.
-
-    Returns
-    -------
-    sigma_surface : ndarray
-        Intrinsic surface conductivity sigma_S [S/m].
-    """
-    beta_s_25 = float(config.get('revil_beta_s_25', 0.53e-8))
-    alpha_T = float(config.get('revil_alpha_T', 0.040))
-
-    T_arr = np.asarray(T, dtype=float)
-    beta_s = beta_s_25 * (1.0 + alpha_T * (T_arr - 25.0))
-    beta_s = np.clip(beta_s, 0.0, None)
-
-    return ((2.0 / 3.0)
-            * rho_g
-            * beta_s
-            * CEC
-            * (S_total ** (n_arr - 1.0)))
-
-
 # ----------------------------------------------------------------------------
 # Revil et al. (2019) calibration -- globally-fit mobilities for volcanic rocks
 # ----------------------------------------------------------------------------
@@ -2803,6 +2723,82 @@ def revil_bulk_conductivity(sigma_fluid, F, sigma_ss):
         sigma_bulk = np.where(below, sigma_bulk_add, sigma_bulk)
 
     return sigma_bulk
+
+
+def _revil_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
+                                CEC, T, sigma_w, m_arr, config):
+    """
+    Revil (2002, 2019) surface-conduction contribution, returned in
+    the additive form expected by the library's bulk mixing law.
+
+    This helper wraps the full Revil 2019 Bussian DEM bulk conductivity
+    (revil_bulk_conductivity, Eq. 10) and converts the result into an
+    "effective surface term" that, added to sigma_w / F, reproduces the
+    DEM bulk:
+
+        sigma_surface = sigma_bulk_DEM(sigma_w, F, sigma_ss)  -  sigma_w / F
+
+    where sigma_ss is the Revil 2019 DC grain conductivity from
+    revil_grain_conductivity. In the high-salinity linear limit
+    (Revil 2019 Eq. 18) this reduces to (m/F) * (B - lambda) * Q_V;
+    near the Dukhin-number isoconductivity point it captures the
+    nonlinear rollover that the WS / Levy additive surface terms
+    cannot.
+
+    The previous implementation of this helper (Revil 2002 Eq. 7,
+    sigma_S = (2/3) * rho_g * beta_s * CEC) is superseded -- Revil
+    2002's zeolitized-tuff calibration overpredicts surface
+    conduction in volcanic clay caps, and its (2/3) DEM prefactor
+    has no porosity / F dependence, which is inconsistent with the
+    full Bussian mixing. The Revil 2019 fit on 205 volcanic cores
+    (Kilauea, White Island, Krafla, Yellowstone, ...) is specifically
+    targeted at geothermal clay caps.
+
+    Parameters
+    ----------
+    phi_eff : ndarray
+        Effective (halite-corrected) porosity [-].
+    F : ndarray
+        Formation factor [-].
+    S_total : ndarray
+        Total wetting saturation [-].
+    n_arr : ndarray
+        Saturation exponent [-]. Applied as an (S_total)^(n-1) scaling
+        on the resulting surface term so that at S_total = 1 the full
+        DEM result is recovered.
+    rho_g : ndarray
+        Grain density [kg/m^3].
+    CEC : ndarray
+        Cation exchange capacity [C/kg].
+    T : ndarray
+        Temperature [deg C].
+    sigma_w : ndarray
+        Pore-fluid conductivity [S/m] (the liquid-phase conductivity
+        used by the DEM).
+    m_arr : ndarray
+        Cementation exponent [-]; enters via sigma_ss = (B-lambda)*Q_V/F
+        and via F = 1/phi^m.
+    config : dict
+        Unused here but kept in the signature for interface parity
+        with the WS and Levy helpers.
+
+    Returns
+    -------
+    sigma_surface : ndarray
+        Effective additive surface-conduction contribution [S/m].
+    """
+    sigma_ss = revil_grain_conductivity(phi_eff, CEC, rho_g, T, m_arr)
+    sigma_w_arr = np.asarray(sigma_w, dtype=float)
+    F_arr = np.asarray(F, dtype=float)
+
+    sigma_bulk_dem = revil_bulk_conductivity(sigma_w_arr, F_arr, sigma_ss)
+    sigma_surface = sigma_bulk_dem - sigma_w_arr / F_arr
+    # Numerical guard: the DEM is monotonically >= sigma_w/F everywhere
+    # in practice, but clip tiny negative excursions from float round-off.
+    sigma_surface = np.clip(sigma_surface, 0.0, None)
+    # Partial-saturation correction, matching the WS / Levy branches.
+    return sigma_surface * (np.asarray(S_total, dtype=float)
+                            ** (np.asarray(n_arr, dtype=float) - 1.0))
 
 
 # =============================================================================
@@ -3274,9 +3270,10 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
     Surface conduction (sigma_surface) is added in both cases using the
     configured surface_conduction_model. Available options:
     'waxman_smits' (classical WS with sigma_w-dependent B),
-    'revil' (Revil 2002 DC-calibrated beta_s),
+    'revil' (Revil 2019 Bussian DEM calibrated on 205 volcanic cores,
+        wrapped additively via revil_bulk_conductivity - sigma_w/F),
     'levy' (Levy 2018 Eq. 16),
-    'waxman_smits_revil' (WS outside, Revil 2002 in clay_cap_regions),
+    'waxman_smits_revil' (WS outside, Revil 2019 DEM in clay_cap_regions),
     'waxman_smits_levy' (WS outside, Levy in clay_cap_regions).
 
     Parameters
@@ -3386,7 +3383,8 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
     def _revil(mask):
         return _revil_surface_conductivity(
             phi_eff[mask], F[mask], S_total[mask], n_arr[mask],
-            rho_g[mask], CEC[mask], T_h[mask], config)
+            rho_g[mask], CEC[mask], T_h[mask], sigma_w_h[mask],
+            m_arr[mask], config)
 
     def _levy(mask):
         return _levy_surface_conductivity(
@@ -3400,7 +3398,7 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
               f"B(sigma_w)) everywhere ({n_h} nodes)")
     elif surface_model == 'revil':
         sig_surface = _revil(all_mask)
-        print(f"    Surface model: Revil (2002) everywhere "
+        print(f"    Surface model: Revil (2019) Bussian DEM everywhere "
               f"({n_h} nodes)")
     elif surface_model == 'levy':
         sig_surface = _levy(all_mask)
@@ -3426,7 +3424,8 @@ def _compute_hydrothermal_domain(T, phi, sigma_fluid, sig_liq, sig_vap,
             else:  # waxman_smits_levy
                 sig_surface[clay_mask] = _levy(clay_mask)
 
-        clay_model = ('Revil (2002)' if surface_model == 'waxman_smits_revil'
+        clay_model = ('Revil (2019) Bussian DEM'
+                      if surface_model == 'waxman_smits_revil'
                       else 'Levy (2018)')
         print(f"    Surface model: Waxman-Smits on "
               f"{int(np.sum(~clay_mask))} non-clay nodes, "
