@@ -29,6 +29,16 @@ Mixing laws:
     archie_three_phase          Glover (2010) n-phase additive Archie
     cementation_exponents_samrock  Samrock et al. (2021) variable m_i
     hashin_shtrikman_upper      Hashin & Shtrikman (1962) upper bound
+    revil_grain_conductivity    Revil (2019) DC grain conductivity
+                                sigma_ss = (B - lambda) * Q_V / F,
+                                Arrhenius-T-dependent mobilities fit
+                                on 205 volcanic cores.
+    revil_bulk_conductivity     Revil (2002, 2019) Bussian-form DEM
+                                bulk conductivity (closed-form Eq. 10
+                                of Revil 2019). Sensitivity option;
+                                captures the Dukhin-number rollover
+                                at low pore-fluid salinity that the
+                                linear additive WS / Levy forms miss.
 
 Pipeline:
     calculate_conductivity_nodal  Full nodal conductivity pipeline
@@ -85,8 +95,10 @@ Hydrothermal domain (no melt):
                              surface conductivity sigma_S from their
                              Eq. 7, (2/3)*rho_g*beta_s*CEC (reproduces
                              their Fig. 7b). For the full bulk
-                             Eqs. 11-13 with Dukhin-number rollover,
-                             see revil2002_bulk_conductivity().
+                             Bussian-DEM mixing with Dukhin-number
+                             rollover, using the Revil (2019) volcanic-
+                             rock calibration, see
+                             revil_bulk_conductivity().
         'levy'               Lévy et al. (2018, Eq. 16) empirical
                              smectite-inclusive parameterization.
         'waxman_smits_revil' WS in non-clay regions, Revil 2002 in
@@ -366,13 +378,15 @@ options are available, selected via config['surface_conduction_model']:
 
       When combined with the library's additive-form bulk mixing law
       (sigma_bulk = sigma_f/F + sigma_surface, as used for WS and
-      Levy), this is equivalent to Revil 2002's high-salinity limit
-      (Eq. 10, with the small -sigma_f*t_+/F correction omitted).
-      For faithful treatment at clay-cap conditions where xi =
-      sigma_S/sigma_f approaches the isoconductivity point xi_+ =
-      1 - t_+ ~ 0.61 for NaCl, call revil2002_bulk_conductivity()
-      directly -- it implements the full Eqs. 11-13 with the Dukhin
-      rollover.
+      Levy), this is equivalent to the high-salinity linear limit of
+      the Revil (2002, 2019) Bussian-DEM formulation. For faithful
+      treatment at clay-cap conditions where the Dukhin number X =
+      sigma_ss / sigma_w approaches unity, call revil_bulk_conductivity()
+      directly -- it implements the full Bussian-form DEM (Revil 2019
+      Eq. 10) with the volcanic-rock calibration of Revil et al. 2019
+      (B_25 = 3.1e-9, lambda_25 = 3.0e-10 m^2/(V*s), fit on 205 cores
+      from Kilauea, White Island, Krafla, Yellowstone, etc.), which
+      is specifically targeted at imaging geothermal clay caps.
 
       NOTE: earlier versions of this library used Revil 1998 Eq. 8
       geometry (1-phi)/(F*phi) or the (F-1)/F prefactor from Revil
@@ -718,9 +732,9 @@ DEFAULT_CONFIG = {
     # sigma_S is the INTRINSIC clay surface conductivity, independent
     # of pore fluid or F. The _revil_surface_conductivity helper
     # implements this Eq. 7 literally (no F factor). For the full bulk
-    # Eqs. 11-13 including the Dukhin-number rollover across the
-    # isoconductivity point, call revil2002_bulk_conductivity() --
-    # required at xi = sigma_S/sigma_f below xi_+ = 1 - t_+ = 0.61.
+    # Bussian-DEM mixing with Dukhin-number rollover, using the Revil
+    # (2019) volcanic-rock recalibration (n = 205 cores), call
+    # revil_bulk_conductivity() directly.
     'revil_beta_s_25': 0.53e-8,  # beta_s(Na+, 25C) [m2/(V.s)], Revil 2002 Eq. 7 + Fig. 7b
     'revil_alpha_T': 0.040,      # temperature coefficient [1/C], Revil 2002 Eq. 19 (nu_S)
 
@@ -2536,20 +2550,19 @@ def _revil_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
     the DEM geometric averaging factor for spherical grains (Revil &
     Glover 1998; Bruggeman 1935).
 
-    IMPORTANT: in Revil 2002, the dependence of the BULK rock
-    conductivity on F enters separately via their Eqs. 11-13, which
-    build sigma_bulk = sigma_f/F * H(xi) from sigma_S and the
-    pore-fluid conductivity. See revil2002_bulk_conductivity() for a
-    full Eq. 11/12/13 implementation that includes the Dukhin-number
-    rollover below the isoconductivity point.
+    IMPORTANT: in Revil 2002 / 2019, the dependence of the BULK rock
+    conductivity on F enters separately via the Bussian-form DEM,
+    which builds sigma_bulk from a grain conductivity sigma_ss and the
+    pore-fluid conductivity sigma_w. See revil_bulk_conductivity() for
+    the full Revil 2019 Eq. 10 closed-form DEM with the updated
+    volcanic-rock mobility calibration.
 
     When this helper's output is used in the library's additive-form
     bulk mixing law (sigma_bulk = sigma_f/F + sigma_surface, as used
-    for WS and Levy), it is equivalent to applying Revil 2002's
-    high-salinity limit (their Eq. 10, with the small correction
-    -sigma_f*t_+/F omitted). This is accurate for xi = sigma_S/sigma_f
-    well above the isoconductivity point xi_+ = 1 - t_+ ~ 0.61 for
-    NaCl; at lower salinity, use revil2002_bulk_conductivity().
+    for WS and Levy), it is equivalent to the high-salinity linear
+    limit of the Bussian DEM. This is accurate well above the
+    isoconductivity point sigma_w ~ sigma_ss; at lower salinity, call
+    revil_bulk_conductivity() directly.
 
     Note: Revil 2002 Eq. 7 also includes a residual-CEC subtraction
     (CEC - CEC_r) to remove the zeolite fraction that is measured by
@@ -2612,66 +2625,144 @@ def _revil_surface_conductivity(phi_eff, F, S_total, n_arr, rho_g,
             * (S_total ** (n_arr - 1.0)))
 
 
-def revil2002_bulk_conductivity(sigma_fluid, F, sigma_S, t_plus=0.39):
+# ----------------------------------------------------------------------------
+# Revil et al. (2019) calibration -- globally-fit mobilities for volcanic rocks
+# ----------------------------------------------------------------------------
+# Revil, A., Ghorbani, A., Jougnot, D., Karaoulis, M. (2019). Induced
+# polarization of volcanic rocks -- 3. Imaging clay cap properties in
+# geothermal fields. J. Geophys. Res. Solid Earth 124, 4367-4390.
+# Values are Figure 9/10 fits to 205 volcanic core samples spanning
+# Kilauea, White Island, Krafla, Yellowstone, and other geothermal
+# settings -- i.e. calibrated specifically for clay caps in volcanic
+# systems, which makes them a better choice than the Revil (2002)
+# zeolitized-tuff calibration when imaging altered volcanic rocks.
+REVIL2019_B_NA_25 = 3.1e-9       # m^2 / (V*s); apparent cation mobility
+REVIL2019_LAMBDA_NA_25 = 3.0e-10  # m^2 / (V*s); anion contribution mobility
+REVIL2019_EA_JMOL = 16.0e3       # J/mol; Arrhenius activation energy for
+                                 # both B and lambda
+R_GAS_JMOL = 8.314                # J / (mol*K)
+
+
+def revil_grain_conductivity(phi, CEC, rho_g, T_C, m_arr):
     """
-    Full Revil et al. (2002) bulk conductivity via Eqs. 11-13 with
-    Dukhin-number rollover across the isoconductivity point.
+    DC grain conductivity sigma_ss entering the Revil (2002, 2019)
+    Bussian-form differential effective medium (DEM) mixing law.
 
-    Reference: Revil, A., Hermitte, D., Spangenberg, E. & Cochemé,
-    J.J. (2002). Electrical properties of zeolitized volcaniclastic
-    materials. J. Geophys. Res. 107(B8), 2168. Equations 11, 12, 13
-    (page 8 of the published paper).
+    References
+    ----------
+    Revil, A., Hermitte, D., Spangenberg, E., Cochemé, J.J. (2002).
+        Electrical properties of zeolitized volcaniclastic materials.
+        J. Geophys. Res. 107(B8), 2168.  -- introduced the Bussian DEM
+        framework for clay-/zeolite-bearing volcanics.
+    Revil, A., Ghorbani, A., Jougnot, D., Karaoulis, M. (2019).
+        Induced polarization of volcanic rocks -- 3. Imaging clay cap
+        properties in geothermal fields. J. Geophys. Res. Solid Earth
+        124, 4367-4390. Eqs. 7, 8, 18-21.  -- re-calibration of the
+        apparent mobilities on 205 volcanic core samples, targeted at
+        clay-cap imaging.
 
-    Their framework decomposes the bulk rock conductivity into cation
-    and anion contributions:
+    Equation
+    --------
+    Per Revil (2019) Eq. 7, with the anion contribution of their
+    Eq. 18 DC linear limit:
 
-        sigma = sigma_(+) + sigma_(-)     (Eq. 3)
-        sigma_(-) = (sigma_f / F) * (1 - t_+)  (only anions in bulk
-                                                fluid; cations are
-                                                mostly surface-bound)
+        sigma_ss = (B(T) - lambda(T)) * Q_V / F
 
-    and combines them into a single relation in terms of the Dukhin
-    number xi = sigma_S / sigma_f:
+    where the volumetric excess charge follows Revil (1998, Eq. 8):
 
-        sigma / sigma_f = (1/F) * H(xi)                        (Eq. 11)
+        Q_V = rho_g * (1 - phi) / phi * CEC
 
-    with H(xi) piecewise in xi:
+    F = 1 / phi^m is the Archie formation factor, and the apparent
+    mobilities are Arrhenius-T-dependent (Revil 2019 Eqs. 19-21):
 
-        xi_+ = 1 - t_+     (isoconductivity point; continuity of H)
+        B(T)      = B_25      * exp[-(E_a/R) * (1/T - 1/298.15)]
+        lambda(T) = lambda_25 * exp[-(E_a/R) * (1/T - 1/298.15)]
 
-        H(xi) = 1 - t_+ + F*xi                                 (Eq. 13)
-            for xi >= xi_+  (high-salinity regime)
-            This is equivalent to the simple additive form
-            sigma = sigma_S + (sigma_f / F) * (1 - t_+).
+    with T in Kelvin. Default parameter values (Revil 2019 Figures
+    9, 10):
 
-        H(xi) = 1 - t_+ + F*xi
-              + (1/2) * (1 - t_+ - xi)
-                * [1 - sqrt((1 - xi/t_+)^2 + 4*F*xi/t_+)]      (Eq. 12)
-            for xi < xi_+  (low-salinity / close-to-isoconductivity)
-            The correction term (1/2)(1-t_+-xi)*[1 - sqrt(...)]
-            subtracts from the high-salinity asymptote, reflecting
-            the reduced surface-conduction contribution when
-            xi < xi_+.
+        B_25      = 3.1e-9  m^2/(V*s)   (n = 205, std err +/-0.3e-9)
+        lambda_25 = 3.0e-10 m^2/(V*s)   (+/-0.7e-10)
+        E_a       = 16 kJ/mol
 
-    Both branches evaluate to the same value at xi = xi_+ = 1 - t_+
-    (the correction term's (1-t_+-xi) factor vanishes), so H is
-    continuous there.
+    Parameters
+    ----------
+    phi : ndarray       Porosity [-]
+    CEC : ndarray       Cation exchange capacity [C/kg]
+    rho_g : ndarray     Grain density [kg/m^3]
+    T_C : ndarray       Temperature [deg C]
+    m_arr : ndarray     Cementation exponent [-]
+
+    Returns
+    -------
+    sigma_ss : ndarray  DC grain conductivity [S/m]
+    """
+    phi_safe = np.clip(np.asarray(phi, dtype=float), 1e-6, 1.0)
+    CEC_safe = np.clip(np.asarray(CEC, dtype=float), 0.0, None)
+    rho_g_arr = np.asarray(rho_g, dtype=float)
+    T_K = np.asarray(T_C, dtype=float) + 273.15
+    m_safe = np.asarray(m_arr, dtype=float)
+
+    arrhenius = np.exp(-(REVIL2019_EA_JMOL / R_GAS_JMOL)
+                       * (1.0 / T_K - 1.0 / 298.15))
+    B_T = REVIL2019_B_NA_25 * arrhenius
+    lambda_T = REVIL2019_LAMBDA_NA_25 * arrhenius
+
+    Q_V = rho_g_arr * (1.0 - phi_safe) / phi_safe * CEC_safe
+    F = 1.0 / np.power(phi_safe, m_safe)
+    return (B_T - lambda_T) * Q_V / F
+
+
+def revil_bulk_conductivity(sigma_fluid, F, sigma_ss):
+    """
+    Full Revil (2002, 2019) bulk DC electrical conductivity via the
+    Bussian-form differential effective medium (DEM) closed-form
+    solution.
+
+    References
+    ----------
+    Revil, A., Hermitte, D., Spangenberg, E., Cochemé, J.J. (2002).
+        Electrical properties of zeolitized volcaniclastic materials.
+        J. Geophys. Res. 107(B8), 2168.  -- original Bussian DEM
+        framework for altered volcanics.
+    Revil, A., Ghorbani, A., Jougnot, D., Karaoulis, M. (2019).
+        Induced polarization of volcanic rocks -- 3. Imaging clay cap
+        properties in geothermal fields. J. Geophys. Res. Solid Earth
+        124, 4367-4390. Eqs. 2, 10.  -- re-calibration of the Bussian
+        mobilities on 205 volcanic core samples, with an explicit
+        target of imaging geothermal clay caps.
+
+    Equation
+    --------
+    Closed-form DEM bulk conductivity (Revil 2019 Eq. 10),
+
+        sigma = (sigma_w / F)
+              * [ F*X + (1/2) * (1 - X)
+                   * ((1 - X) + sqrt((1 - X)^2 + 4 F X)) ]
+
+    where X = sigma_ss / sigma_w is the Dukhin number and F = 1/phi^m
+    is the Archie formation factor. sigma_ss is the DC grain
+    conductivity, normally obtained from revil_grain_conductivity
+    (equivalent to (B - lambda) * Q_V / F in the Revil 2019
+    parameterisation).
+
+    Eq. 10 is the closed-form Bussian solution valid above the
+    isoconductivity point X <= 1 (sigma_w >= sigma_ss). Below it (X > 1,
+    i.e. exceptionally dilute pore fluid combined with very conductive
+    grain surfaces), the full implicit Bussian Eq. 2 requires numerical
+    inversion; we fall back to the additive high-salinity linear limit
+    sigma ~= sigma_ss + sigma_w/F (Revil 2019 Eq. 18) and emit a
+    warning. For the saline geothermal plumes this library is intended
+    for, X << 1 everywhere and the fallback branch is not exercised.
 
     Parameters
     ----------
     sigma_fluid : ndarray
-        Pore-fluid (brine) conductivity [S/m].
+        Pore-fluid conductivity [S/m].
     F : ndarray
-        Formation factor [-]. Usually F = 1 / phi^m in Archie.
-    sigma_S : ndarray
-        Intrinsic surface conductivity of the clay fraction [S/m],
-        as returned by _revil_surface_conductivity (Eq. 7).
-    t_plus : float, default 0.39
-        Cation transport number in the pore fluid. Default 0.39 is
-        the Na+ transport number in aqueous NaCl at 25 C (Robinson
-        & Stokes). Mildly temperature-dependent; the default is
-        adequate for geothermal applications within its ~10%
-        uncertainty.
+        Formation factor [-]. Typically F = 1 / phi^m.
+    sigma_ss : ndarray
+        DC grain conductivity [S/m], from revil_grain_conductivity.
 
     Returns
     -------
@@ -2680,45 +2771,38 @@ def revil2002_bulk_conductivity(sigma_fluid, F, sigma_S, t_plus=0.39):
 
     Notes
     -----
-    Unlike the additive form used for WS and Levy, this function
-    returns the BULK conductivity directly -- there is no "surface
-    contribution" to add to sigma_fluid/F. The pore-fluid contribution
-    (1-t_+) * sigma_f/F is already baked into H(xi).
-
-    For Yuzawa production (which uses the additive framework), the
-    _revil_surface_conductivity helper's output is used as sigma_s
-    in sigma_bulk = sigma_f/F + sigma_s, which approximates this
-    full result at xi >> xi_+.
+    Unlike WS and Levy which return a surface term to be ADDED to
+    sigma_w/F, this function returns the full bulk sigma directly --
+    the pore-fluid contribution is already baked into the DEM solution.
     """
     sigma_f = np.asarray(sigma_fluid, dtype=float)
     F_arr = np.asarray(F, dtype=float)
-    sigma_S_arr = np.asarray(sigma_S, dtype=float)
-    t_p = float(t_plus)
+    sigma_ss_arr = np.asarray(sigma_ss, dtype=float)
 
-    # Dukhin number
     sigma_f_safe = np.where(sigma_f > 0.0, sigma_f, 1e-30)
-    xi = sigma_S_arr / sigma_f_safe
-    xi_plus = 1.0 - t_p  # isoconductivity point
+    X = sigma_ss_arr / sigma_f_safe
 
-    # High-salinity branch (Eq. 13): H = (1 - t_+) + F * xi
-    H_high = (1.0 - t_p) + F_arr * xi
+    # Revil 2019 Eq. 10 closed-form solution (valid for X <= 1).
+    one_minus_X = 1.0 - X
+    sqrt_arg = np.maximum(one_minus_X ** 2 + 4.0 * F_arr * X, 0.0)
+    H = F_arr * X + 0.5 * one_minus_X * (one_minus_X + np.sqrt(sqrt_arg))
+    sigma_bulk = sigma_f * H / F_arr
 
-    # Low-salinity branch (Eq. 12): H = H_high + correction
-    # correction = (1/2) * (1 - t_+ - xi) * [1 - sqrt((1 - xi/t_+)^2
-    #                                                + 4 F xi / t_+)]
-    # Guard against xi/t_+ making the sqrt argument negative (it
-    # can't mathematically, but guard numerically).
-    xi_over_tp = xi / max(t_p, 1e-12)
-    sqrt_arg = (1.0 - xi_over_tp) ** 2 + 4.0 * F_arr * xi / max(t_p, 1e-12)
-    sqrt_arg = np.maximum(sqrt_arg, 0.0)
-    correction = 0.5 * (1.0 - t_p - xi) * (1.0 - np.sqrt(sqrt_arg))
-    H_low = H_high + correction
+    # Fallback below the isoconductivity point: additive high-salinity
+    # linear limit (Revil 2019 Eq. 18 DC form).
+    below = X > 1.0
+    if np.any(below):
+        n_below = int(np.sum(below))
+        warnings.warn(
+            f"revil_bulk_conductivity: {n_below} cells are below the "
+            f"Revil 2019 isoconductivity point (sigma_w < sigma_ss); "
+            f"using the additive high-salinity limit "
+            f"sigma = sigma_ss + sigma_w / F as a fallback instead of "
+            f"the full implicit Bussian inversion.")
+        sigma_bulk_add = sigma_ss_arr + sigma_f / F_arr
+        sigma_bulk = np.where(below, sigma_bulk_add, sigma_bulk)
 
-    # Piecewise assembly
-    H = np.where(xi >= xi_plus, H_high, H_low)
-
-    # Eq. 11: sigma/sigma_f = H / F
-    return sigma_f * H / F_arr
+    return sigma_bulk
 
 
 # =============================================================================
