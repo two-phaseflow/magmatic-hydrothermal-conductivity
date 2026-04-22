@@ -58,13 +58,9 @@ Selectable via `config['surface_conduction_model']`:
 
 Surface conduction is added to the mixing-law bulk term, with all formulations using `φ_eff = φ·(1 − S_halite)` so precipitated halite volume is excluded from the fluid-accessible pore space.
 
-### CEC unit convention
-
-CEC values are specified per region in `meq/100g`. Internally converted to C/kg via `MEQ_TO_CKG = 964.85` (= F·10⁻³/0.1, with F the Faraday constant). Earlier versions of this library used 9.6485 (100× too small); this has been fixed. All Waxman-Smits and Revil surface conduction results from versions prior to commit `7dc33c2` were suppressed by a factor of 100 by this unit bug — Lévy was unaffected because it only uses `CEC/CEC_0` as a ratio.
-
 ### Mixing laws
 
-Per-region cementation exponents with literature-derived defaults:
+Per-region cementation exponents with defaults:
 - Intrusive/crystalline basement: m = 1.7
 - Volcanic edifice: m = 2.1
 - Clay cap (altered volcanics): m = 2.2
